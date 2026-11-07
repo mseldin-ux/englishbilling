@@ -1,0 +1,159 @@
+body { margin: 0; color: #212529; background: #fff; font: 16px/1.5 Arial, sans-serif; }
+.records-workspace { font-size: 12px; line-height: 1.25; }
+.records-workspace p { margin: .4rem 0; }
+.records-workspace th, .records-workspace td { padding: .18rem .3rem; vertical-align: top; border: 1px solid #d5d5d5; }
+.records-workspace button { font-size: 11px; padding: .15rem .3rem; }
+.records-workspace th { white-space: nowrap; }
+.records-workspace td { min-width: 4rem; }
+.records-workspace td input:not([type=checkbox]), .records-workspace td select { font-size: 11px; padding: .1rem; width: 8rem; }
+.records-filter { display: flex; flex-wrap: wrap; gap: .35rem; align-items: end; margin: .35rem 0; }
+.records-filter label { margin: 0; }
+.records-filter input:not([type=checkbox]), .records-filter select { width: 12rem; padding: .2rem; }
+.records-filter .filter-values { display: flex; gap: .35rem; }
+header, main { max-width: 1200px; margin: 0 auto; padding: 1rem 2rem; }
+header { border-bottom: 1px solid #ccc; }
+h1 { font-size: 32px; margin: 0 0 1rem; }
+a { color: #0056b3; }
+table { border-collapse: collapse; width: 100%; }
+th, td { padding: .5rem; text-align: left; border-bottom: 1px solid #ccc; }
+th { background: #9fc; }
+tbody tr:nth-child(even) { background: #cee; }
+label { display: block; margin: .8rem 0; }
+input:not([type=checkbox]) { display: block; padding: .4rem; width: min(24rem, 90%); }
+button { padding: .4rem .8rem; cursor: pointer; }
+.inline { display: inline; }
+[role=alert] { color: #a00; border: 1px solid #a00; }
+[role=status] { color: #175529; }
+header, main { max-width: 1500px; }
+nav { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+dialog { max-width: 800px; width: calc(100% - 4rem); border: 1px solid #777; border-radius: 4px; }
+dialog::backdrop { background: #0007; }
+fieldset { margin: 1rem 0; padding: 1rem; border: 1px solid #aaa; min-width: 0; }
+legend { font-weight: bold; }
+label { font-size: 13px; font-weight: bold; }
+input, textarea, select { font: inherit; box-sizing: border-box; border: 1px solid #999; border-radius: 3px; }
+textarea, select { display: block; width: 100%; padding: .35rem; }
+.student-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 1rem; }
+.field-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .3rem 1rem; }
+.field-grid input:not([type=checkbox]) { width: 100%; }
+.wide-field { grid-column: 1 / -1; }
+.inline input.compact { display: inline-block; width: 7rem; }
+.table-scroll { overflow-x: auto; }
+.record-table { font-size: 12px; }
+.record-table input:not([type=checkbox]) { width: 9rem; }
+.record-table input[type=date] { width: 10rem; }
+.record-table th, .record-table td { padding: .4rem; vertical-align: top; }
+.record-actions { min-width: 6rem; }
+.record-actions form { display: inline-block; }
+.record-actions a, .record-actions span { display: block; }
+.record-table .form-status { display: block; width: 7rem; white-space: normal; }
+.dirty, tr:has(form.dirty) { background: #e1f2fc !important; }
+.save-bar { position: sticky; top: 0; background: white; border-bottom: 1px solid #aaa; padding: .6rem; z-index: 1; }
+.form-status, .section-status { margin: .5rem; font-size: 13px; white-space: pre-line; }
+.hint { font-size: 13px; color: #444; }
+.browse tr[data-href] { cursor: pointer; }
+.browse tr:hover { background: #8ccf84; }
+button:disabled { opacity: .6; cursor: wait; }
+#session-state:empty { display: none; }
+#session-state { margin: .2rem auto; max-width: 1500px; padding: 0 2rem; font-size: 13px; }
+#edit-lock-banner { background: #eef5ff; border: 1px solid #99b3d5; padding: .15rem .4rem; font-size: 12px; }
+#edit-lock-banner button, #edit-lock-banner a { margin-left: .4rem; }
+.remaining-amount { font-weight: bold; }
+section { border-top: 1px solid #999; margin-top: 2rem; }
+header { padding-top: .4rem; padding-bottom: .4rem; }
+header h1 { font-size: 22px; margin-bottom: .2rem; }
+main { padding-top: .5rem; }
+#student-detail h2 { font-size: 18px; margin: .4rem 0; }
+#student-detail > p, .record-navigation { margin: .3rem 0; font-size: 13px; }
+.student-columns { align-items: start; gap: .7rem; }
+.student-columns fieldset { margin: .3rem 0; padding: .3rem .5rem; }
+.student-columns legend { font-size: 12px; }
+.field-grid { gap: .15rem .5rem; }
+.field-grid label { display: grid; grid-template-columns: 90px minmax(0, 1fr); align-items: center; margin: 0; gap: .2rem; font-size: 11px; line-height: 1.2; }
+.field-grid input:not([type=checkbox]), .field-grid select, .field-grid textarea { padding: .15rem .25rem; min-width: 0; font-size: 12px; }
+.field-grid input:not([type=checkbox]), .field-grid select { height: 25px; }
+.field-grid textarea { min-height: 36px; resize: vertical; }
+.save-bar { padding: .2rem; }
+#student-form > button { margin-top: .2rem; }
+#student-detail section { margin-top: .7rem; }
+.invoice-dialog { max-height: 85vh; overflow-y: auto; }
+.invoice-dialog h2 { margin: .2rem 0; }
+.invoice-editor-fields { display: grid; grid-template-columns: 1fr 1fr; gap: .25rem 1rem; }
+.invoice-editor-fields label { margin: .3rem 0; }
+.invoice-editor-fields input:not([type=checkbox]) { width: 100%; }
+.invoice-editor-fields textarea { resize: vertical; }
+.invoice-notes { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 22rem; }
+.dialog-actions { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+#student-detail button, header nav button { padding: .2rem .45rem; font-size: 12px; }
+#student-detail > p, .record-navigation { line-height: 1.3; margin: .2rem 0; }
+#student-detail h2 { line-height: 1.2; margin: .25rem 0; }
+.student-columns fieldset { margin: .2rem 0; padding: .2rem .4rem; }
+.field-grid input:not([type=checkbox]), .field-grid select { height: 22px; }
+.field-grid textarea { min-height: 32px; }
+@media (max-width: 800px) {
+    .student-columns { grid-template-columns: 1fr; }
+    header, main { padding: 1rem; }
+}
+@media (max-width: 1100px) {
+    .field-grid label { grid-template-columns: 75px minmax(0, 1fr); }
+}
+@media (max-width: 500px) {
+    .field-grid, .invoice-editor-fields { grid-template-columns: 1fr; }
+}
+
+/* Forms */
+.form-page fieldset { margin: 0 0 12px; max-width: 760px; }
+.form-page fieldset label { display: block; margin: 6px 0; }
+.form-page label.check { display: inline; }
+.yes-question { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; border-bottom: 1px solid #eee; }
+.learner-results { list-style: none; padding: 0; margin: 4px 0; max-height: 240px; overflow: auto; }
+.learner-results button { display: block; width: 100%; text-align: left; }
+.form-notice { max-width: 760px; }
+.danger-zone { margin-top: 16px; padding: 8px; border: 1px solid #c33; max-width: 760px; }
+.forms-filter label { margin-right: 8px; }
+.forms-table td, .forms-table th { padding: 3px 6px; border-bottom: 1px solid #ddd; vertical-align: top; }
+.existing-sheets { max-width: 760px; margin: 0 0 12px; padding: 6px 10px; border: 1px solid #c90; background: #fff8e1; }
+.existing-sheets ul { margin: 4px 0; }
+.form-page .warning { color: #a00; font-weight: bold; }
+.grades-table { border-collapse: collapse; width: 100%; }
+.grades-table td, .grades-table th { padding: 3px 6px; border-bottom: 1px solid #ddd; text-align: left; vertical-align: middle; }
+.grades-table td:first-child { width: 2.5em; color: #555; }
+.grades-table input[type="text"] { width: 10em; }
+.form-page .grades-table label { display: inline; margin: 0; }
+.form-page textarea { width: 100%; box-sizing: border-box; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Adult Learner portal */
+.portal { max-width: 760px; margin: 0 auto; padding: 0 12px; }
+.portal-header { padding: 12px 0; border-bottom: 1px solid #ddd; }
+.portal-logo { width: 240px; max-width: 70%; }
+.portal-form label { display: block; margin: 12px 0; }
+.portal-form input[type="text"], .portal-form input[type="date"], .portal-form textarea { display: block; width: 100%; box-sizing: border-box; margin-top: 4px; }
+.portal-form fieldset { margin: 12px 0; }
+.portal-form label.check { display: inline-block; margin: 4px 16px 4px 0; }
+.portal-thanks { padding: 8px 12px; border: 1px solid #3a7; background: #eefaf2; }
+.portal-errors { padding: 8px 12px; border: 1px solid #c33; background: #fdf0f0; }
+.portal h1 { font-size: 26px; overflow-wrap: anywhere; }
+.workflow-panel { max-width: 760px; margin: 16px 0; padding: 8px 10px; border: 1px solid #bbb; }
+.workflow-panel table { border-collapse: collapse; width: 100%; }
+.workflow-panel td, .workflow-panel th { padding: 3px 6px; border-bottom: 1px solid #ddd; text-align: left; vertical-align: top; }
+.workflow-failed { color: #a00; font-weight: bold; }
+.template-placeholders code { white-space: nowrap; }
+.template-preview { white-space: pre-wrap; border: 1px solid #ccc; padding: 8px; background: #fafafa; max-width: 760px; }
+.workflow-run .workflow-summary th, .workflow-stages td { text-align: left; vertical-align: top; }
+.workflow-current, .workflow-paused { max-width: 900px; margin: 12px 0; padding: 8px 12px; border: 2px solid #c90; background: #fffbe8; }
+.workflow-current-row { background: #fffbe8; }
+.workflow-stage-form label, .workflow-settings label { display: block; margin: 6px 0; }
+.workflow-stage-form fieldset.yesno { border: 0; padding: 4px 0; margin: 4px 0; }
+.workflow-stage-form fieldset.yesno label { display: inline-block; margin-right: 1rem; }
+.workflow-answers { margin: 0; padding-left: 1.2rem; }
+.workflow-actions form { margin: 2px 0; }
+.workflow-admin details { margin: 6px 0; }
+.workflow-settings fieldset { margin: 12px 0; }
+.pre-line { white-space: pre-line; }
+
+.stage-info { border: none; background: none; padding: 0 .2rem; cursor: pointer; color: #1a5fb4; font-size: 1rem; }
+.stage-guide { max-height: 85vh; overflow-y: auto; }
+.stage-guide h3 { margin: .2rem 0; }
+.stage-guide h4 { margin: .9rem 0 .2rem; }
+.stage-guide p, .stage-guide ul { margin: .2rem 0; }

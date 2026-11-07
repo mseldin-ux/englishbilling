@@ -1,0 +1,29 @@
+@page { margin: 30px 28px; }
+body { margin: 0; color: #333; font: 11px/1.4 "DejaVu Sans", Arial, sans-serif; }
+.document-header { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+.document-header td { vertical-align: top; }
+.logo { width: 300px; max-width: 100%; }
+.contact { text-align: right; font-size: 10px; }
+.titlebar { color: white; background: #0054a0; font-size: 23px; padding: 14px 12px; margin: 0 0 16px; }
+h3 { font-size: 12px; margin: 0 0 7px; }
+.sidebar { float: right; width: 24%; background: #dae3f3; }
+.box { background: #fff; padding: 10px; margin: 10px; overflow-wrap: anywhere; word-wrap: break-word; }
+.content { margin-right: 27%; }
+.billing-recipient { width: 100%; margin-bottom: 16px; }
+.billing-recipient td { width: 50%; vertical-align: top; overflow-wrap: anywhere; }
+.ledger { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.ledger thead { display: table-header-group; }
+.ledger th { background: #eee; text-align: left; }
+.ledger td, .ledger th { padding: 5px; border-bottom: 1px solid #ddd; vertical-align: top; overflow-wrap: anywhere; word-wrap: break-word; }
+.ledger tbody tr:nth-child(odd) { background: #f9f9f9; }
+.ledger tr { page-break-inside: avoid; }
+.ledger .date { width: 72px; }
+.ledger .amount { width: 62px; text-align: right; }
+.multiline { white-space: pre-wrap; overflow-wrap: anywhere; }
+.balance { text-align: right; font-weight: bold; }
+.payment-notice { margin: 18px 0; page-break-inside: avoid; }
+.urgent { color: #b00000; font-size: 18px; font-weight: bold; }
+footer { clear: both; background: #0054a0; color: white; padding: 12px; margin-top: 18px; font-size: 10px; }
+.document-actions { padding: 12px; background: #f3f7fa; margin-bottom: 18px; }
+@media screen { body { max-width: 950px; margin: 18px auto; padding: 0 12px; font-size: 13px; } }
+@media print { .document-actions { display: none; } }
