@@ -146,8 +146,8 @@ class BillingDocumentTest extends TestCase
     {
         $detail = $this->get("/detail/{$this->student->id}")->assertOk()->assertSee('Create New Invoice')->assertSee('HTML Statement');
         $this->assertMatchesRegularExpression(
-            '/data-create-invoice>Create New Invoice<\/button>\s*<a class="statement-button" href="'
-                .preg_quote(route('statements.pdf', $this->student), '/').'" target="_blank" rel="noopener">Statement PDF<\/a>/',
+            '/data-create-invoice>Create New Invoice<\/button>\s*<form class="inline" method="get" action="'
+                .preg_quote(route('statements.pdf', $this->student), '/').'" target="_blank" rel="noopener">\s*<button type="submit">Statement PDF<\/button>\s*<\/form>/',
             $detail->getContent(),
         );
         $html = $this->get("/students/{$this->student->id}/invoices")->assertOk()->getContent();

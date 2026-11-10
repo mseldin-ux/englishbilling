@@ -42,7 +42,9 @@
     <button type="button" data-load-section>{{ $kind === 'transactions' ? 'Refresh' : 'Load' }} {{ $heading }}</button>
     @if($kind === 'invoices')
         <button type="button" data-create-invoice>Create New Invoice</button>
-        <a class="statement-button" href="{{ route('statements.pdf', $student) }}" target="_blank" rel="noopener">Statement PDF</a>
+        <form class="inline" method="get" action="{{ route('statements.pdf', $student) }}" target="_blank" rel="noopener">
+            <button type="submit">Statement PDF</button>
+        </form>
     @endif
     <div class="section-status" role="status"></div>
     <div class="section-content">
