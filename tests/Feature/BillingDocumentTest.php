@@ -144,7 +144,12 @@ class BillingDocumentTest extends TestCase
 
     public function test_invoice_ui_has_explicit_buttons_modal_notes_and_preview_links(): void
     {
-        $this->get("/detail/{$this->student->id}")->assertOk()->assertSee('Create New Invoice')->assertSee('HTML Statement');
+        $detail = $this->get("/detail/{$this->student->id}")->assertOk()->assertSee('Create New Invoice')->assertSee('HTML Statement');
+        $this->assertMatchesRegularExpression(
+            '/data-create-invoice>Create New Invoice<\/button>\s*<a class="statement-button" href="'
+                .preg_quote(route('statements.pdf', $this->student), '/').'" target="_blank" rel="noopener">Statement PDF<\/a>/',
+            $detail->getContent(),
+        );
         $html = $this->get("/students/{$this->student->id}/invoices")->assertOk()->getContent();
         $this->assertStringContainsString('id="new-invoice-dialog"', $html);
         $this->assertStringContainsString('name="notes" rows="6"', $html);

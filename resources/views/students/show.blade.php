@@ -40,7 +40,10 @@
 <section id="{{ $kind }}" data-load="{{ route('records.index', [$student, $kind]) }}">
     <h2>{{ $heading }}</h2>
     <button type="button" data-load-section>{{ $kind === 'transactions' ? 'Refresh' : 'Load' }} {{ $heading }}</button>
-    @if($kind === 'invoices')<button type="button" data-create-invoice>Create New Invoice</button>@endif
+    @if($kind === 'invoices')
+        <button type="button" data-create-invoice>Create New Invoice</button>
+        <a class="statement-button" href="{{ route('statements.pdf', $student) }}" target="_blank" rel="noopener">Statement PDF</a>
+    @endif
     <div class="section-status" role="status"></div>
     <div class="section-content">
         @if($kind === 'transactions')

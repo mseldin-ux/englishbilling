@@ -21,6 +21,8 @@ tbody tr:nth-child(even) { background: #cee; }
 label { display: block; margin: .8rem 0; }
 input:not([type=checkbox]) { display: block; padding: .4rem; width: min(24rem, 90%); }
 button { padding: .4rem .8rem; cursor: pointer; }
+.statement-button { display: inline-block; padding: .4rem .8rem; border: 1px solid #777; border-radius: 3px; background: #efefef; color: #212529; font: 13.3333px Arial, sans-serif; text-decoration: none; }
+.statement-button:hover { background: #ddd; }
 .inline { display: inline; }
 [role=alert] { color: #a00; border: 1px solid #a00; }
 [role=status] { color: #175529; }
