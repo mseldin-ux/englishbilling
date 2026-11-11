@@ -1046,6 +1046,22 @@ restricted MySQL users, TLS, private environment configuration, backups,
 The web root must be `public/`, not the application or Django workspace root.
 Do not expose the original dump or the legacy source database.
 
+### Admin utilities: mail connection test
+
+Admins can open **Utilities** in the navigation (`/utilities`) to send an
+immediate plain-text test email using the application's configured mailer.
+The form accepts a sender, recipient, subject and body. It does not change
+the default sender or workflow settings; the provider must authorize the
+chosen sender. Test sends are limited to six per minute.
+
+The page displays the configured mailer and transport, but never credentials.
+With `log` or `array`, it explicitly reports that no email is delivered.
+With a delivery transport, acceptance does not guarantee inbox delivery;
+check the inbox and provider logs (a failover mailer can use its fallback).
+Transport failures appear on the form, with diagnostics in the application
+log. Server mail configuration is still managed through `.env`; rebuild
+the configuration cache after changing it.
+
 **Email (SendGrid).**
 
 - In `.env` set:

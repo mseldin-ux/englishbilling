@@ -41,6 +41,7 @@
                 | <a href="{{ route('users.index') }}">Users</a>
                 | <a href="{{ route('locks.index') }}">Editing Locks</a>
                 | <a href="{{ route('workflows.settings.edit') }}">Workflow Settings</a>
+                | <a href="{{ route('utilities.index') }}">Utilities</a>
             @endif
             | {{ auth()->user()->name }}
             <form method="post" action="{{ route('logout') }}" class="inline">

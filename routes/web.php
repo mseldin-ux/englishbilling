@@ -15,6 +15,7 @@ use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SessionController;
 use App\Http\Controllers\StudentController;
 use App\Http\Controllers\UserController;
+use App\Http\Controllers\UtilitiesController;
 use App\Http\Controllers\WorkflowController;
 use App\Http\Controllers\WorkflowSettingsController;
 use Illuminate\Http\Request;
@@ -51,6 +52,8 @@ Route::middleware(['auth', 'user-access', 'staff-session'])->group(function () {
         return view('home', ['counts' => $counts]);
     })->name('home');
     Route::post('/logout', [SessionController::class, 'destroy'])->name('logout');
+    Route::get('/utilities', [UtilitiesController::class, 'index'])->middleware('admin')->name('utilities.index');
+    Route::post('/utilities/mail', [UtilitiesController::class, 'testMail'])->middleware(['admin', 'throttle:6,1'])->name('utilities.mail');
     Route::get('/records', [RecordsController::class, 'index'])->name('workspace.index');
     Route::get('/records/export', [RecordsController::class, 'export'])->name('workspace.export');
     Route::get('/records/locks', [RecordsController::class, 'tableLocks'])->name('workspace.table-locks');
