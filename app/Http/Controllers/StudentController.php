@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Billing\BillingRules;
 use App\Billing\EditLocks;
+use App\Billing\EnrollmentAttribution;
 use App\Billing\Ledger;
 use App\Billing\RecordVersion;
 use App\Billing\StudentEdits;
@@ -71,9 +72,16 @@ class StudentController extends Controller
         $position = (clone $query)->where('id', '<', $student->id)->count();
         $transactions = $student->transactions()->orderBy('transactiondate')->orderBy('id')->get();
         $summary = Ledger::summary($transactions);
-        $planned = $student->anticipatedPayments()->whereDate('paymentduedate', '>=', today())
-            ->orderBy('paymentduedate')->first();
-        $plannedInvoiceExists = $planned && $student->invoices()->whereDate('nextdate', $planned->paymentduedate)->exists();
+        $plannedQuery = $student->anticipatedPayments()->whereDate('paymentduedate', '>=', today());
+        $invoicesQuery = $student->invoices();
+        if ($student->current_enrollment_id) {
+            foreach (EnrollmentAttribution::current($student) as $field => $value) {
+                $plannedQuery->where($field, $value);
+                $invoicesQuery->where($field, $value);
+            }
+        }
+        $planned = $plannedQuery->orderBy('paymentduedate')->first();
+        $plannedInvoiceExists = $planned && $invoicesQuery->whereDate('nextdate', $planned->paymentduedate)->exists();
 
         return view('students.show', ['student' => $student, 'groups' => StudentFields::GROUPS,
             'accessStatuses' => DB::table('student_access_statuses')->orderBy('id')->get(),
@@ -91,7 +99,10 @@ class StudentController extends Controller
         $updated = StudentEdits::update($student, $data, $version);
 
         return $request->expectsJson()
-            ? response()->json(['message' => 'All changes saved.', 'version' => RecordVersion::of($updated)])
+            ? response()->json(['message' => 'All changes saved.', 'version' => RecordVersion::of($updated),
+                'enrollmentHtml' => view('students.enrollments', ['student' => $updated->fresh(),
+                    'programs' => Program::orderBy('id')->get(),
+                    'editLock' => ['token' => (string) $request->header('X-Student-Lock', $request->input('_edit_lock', ''))]])->render()])
             : back()->with('status', 'All changes saved.');
     }
 

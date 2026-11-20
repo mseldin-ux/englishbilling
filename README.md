@@ -36,6 +36,8 @@ Implemented:
 - Earned Income, Collections, Invoices, Receivables, and rebuilt Prepays
   with HTML/CSV output, exact money, and legacy/source comparisons.
 - Student-wide editing locks, automatic inactivity logout, and admin lock recovery.
+- Program enrollment history, staged Full Certificate enrollment, service-day
+  configuration, and enrollment-aware financial reporting.
 
 All eight reports are implemented. Rebuilt Prepays still requires accounting
 acceptance; production deployment is not implemented.
@@ -151,7 +153,135 @@ workspace. The Django snapshot importer excludes it from legacy comparisons and
 leaves existing history intact. A future Access importer must preserve the first
 saved original value rather than overwrite it on subsequent imports.
 
-## Program fields
+## Program enrollments and stages
+
+Ordinary imported learners retain their existing fields and legacy calculations
+until staff explicitly use **Start new program enrollment** on the billing
+detail page. Migration does not convert existing learners, change financial
+amounts, create tuition fees, or rewrite PDFs.
+
+The new history supports sequential whole-program enrollments (full/associate)
+and staged Full Certificate enrollments under the same learner ID and ledger.
+Current student program/start fields summarize the latest enrollment.
+
+- Admins configure stage service days at `/admin/stage-settings`, also linked
+  from **Utilities**. Programs whose name contains `Full`
+  are eligible. No durations are guessed or seeded: a stage cannot start until
+  its positive duration is configured. Each stage retains the agreed duration,
+  independent of later default changes.
+- Stages are Online coursework, In-person residency, and Practicum internship.
+  Staff may choose them out of order, but cannot overlap active stages/programs.
+  Staff confirmation of prior financial settlement is required for transitions.
+  The system does not equate settlement with a zero balance or automatically
+  charge for future stages.
+- **Complete stage** records its date. Stages 1/2 show “Stage 1 done” / “Stage 2
+  done” between enrollments; stage 3 completion marks graduation. Academic
+  completion is distinct from reaching 100% financially earned.
+- Staff, Billing Staff (No Reports), and admins edit this section with the
+  existing student-wide lock and stale-version protection. Records users see
+  only a read-only current-stage summary in their table/form; they cannot
+  access enrollment controls or financial data.
+- Admin stage-duration configuration is linked from **Utilities**, not every
+  learner's detail page. Existing configured durations are unchanged.
+- Each non-legacy stage/whole-program record has prefilled edit controls even
+  after completion or withdrawal. The latest ended record offers two separate
+  actions, neither of which may overlap a later enrollment/stage:
+  **Resume study** records a return date, excludes the closed interval from
+  service days (unioned with LOAs), and preserves earlier reports and valid
+  settlement markers. **Undo closure** corrects a mistaken latest closure:
+  it retains and marks that event undone, removes only its automatic settlement
+  effect, and restores the preceding academic state. Earlier independent
+  settlements remain valid. Undo requires a reason and explicit confirmation
+  that historical earned-income reports may change; billing rows never change.
+  Program and stage start/end dates remain visible on closed records.
+- **Cancel (retain billing)** keeps the record, its invoices/transactions, and
+  audit history rather than deleting them. Cancellation stops further service
+  on an active record without creating a refund, adjustment, or new settlement;
+  existing settlement events remain effective. All changes require a reason
+  and the student editing lock. Completion does not prevent transaction CRUD.
+- Transactions, invoices, LOAs, and payment schedules identify their enrollment
+  and stage where relevant. New entries default to the current enrollment/stage.
+  Transaction/invoice selectors allow prior enrollments for corrections.
+  An invoice and its linked transactions must agree on enrollment/stage.
+  Application-fee transactions are explicitly marked **Application fee
+  (immediate)**; labels/notes are never used to guess this classification.
+- Payment-plan editing/generation concerns the current enrollment/stage only.
+  Drafts default to that stage's start date and its explicitly classified
+  application-fee total (zero if there is none), not the legacy $100 assumption.
+  Previous schedules are retained. The overall learner balance remains a single
+  signed ledger total, without stage-specific payment balances.
+- On the first new enrollment for a returning learner, the existing program,
+  learner accounting dates/status, service-day settings and LOAs are preserved
+  as legacy context. Existing billing rows acquire a legacy-enrollment link
+  without changing any financial values. Subsequent enrollments do not replace
+  this context.
+- Completion, graduation, withdrawal, suspension, inactivity and extension
+  actions have effective dates. Existing status/date controls and the automatic
+  graduation workflow also record enrollment events. These actions signify
+  prior settlement: the associated unit is 100% earned from that date, not
+  retroactively. LOA is not settlement; PIF alone is not settlement.
+  Clearing a settlement flag cannot reopen a record while another closure
+  flag remains set. Clearing the last closure flag resumes academic activity
+  but retains the original financial settlement event; use **Undo closure**
+  to correct an erroneous settlement. Correcting a status date changes that
+  event's date with an audit entry.
+  The graduation workflow refuses a form from an earlier enrollment or a
+  staged learner who has not reached stage 3, rather than graduating a
+  different/current program accidentally.
+- For new enrollment activity, service recognition is straight-line over the
+  saved service days, capped at 100%, excluding overlapping LOA intervals within
+  that enrollment/stage. Overlapping leave intervals are counted only once.
+  Extensions add no service days and are 100% earned on their effective date.
+  Application fees are immediately earned. No service is accrued for an
+  unpurchased future stage or during a gap.
+- Reports select financial activity using their existing date conventions,
+  calculate each enrollment/stage's contribution separately, and sum it into
+  one learner row. Completed/settled units contribute 100% of their selected
+  activity even when the learner is now in another program or stage. Completion
+  does not pull transactions outside the report's selection into the report.
+  Attributable Income retains its transaction window; Earned Income retains its
+  enrollment-cohort/all-fees convention for legacy activity, and excludes future
+  new-enrollment fees at its as-of cutoff. Prepays retains its transaction window
+  and remains subject to its existing accounting-acceptance notice.
+- Existing report type/sign classifications and rounding remain unchanged.
+  Invoice report hide-graduated/inactive filters use the owning enrollment's
+  status as of the report end date (today when omitted), not a later return
+  enrollment's status. Legacy rows retain their original filtering rules;
+  converted legacy rows use the preserved status snapshot.
+  Mixed-enrollment progress is labeled **Per enrollment/stage**, since one
+  service percentage cannot describe several fees with different service
+  periods. The preserved legacy context is used for historical progress fields.
+- Browse adds historical program/stage, program-or-stage-start, and explicit
+  stage-start date filters. Ranges include both dates; matching uses existence
+  queries so multiple qualifying stages do not duplicate learners. When a stage
+  is selected, its date filters apply to that same stage.
+- Reasoned corrections to agreed service days and start/end dates are available
+  in enrollment history. They are audited, cannot introduce overlaps, and
+  intentionally may change prior report results. Preserved legacy context
+  cannot be rewritten through those controls.
+
+### Repeating staging refreshes
+
+You may test enrollment/stage tracking and refresh the local staging database
+as often as needed. Each applied `billing:refresh` discards test program/stage
+enrollments and their audit events, clears billing attribution and immediate
+application-fee classifications, and resets current-enrollment pointers and
+revision counters. Original billing data is then refreshed from Django.
+Stage-duration settings and logins are retained. The preview lists the history
+to discard without changing any database rows. A failed data refresh rolls
+back the history reset too. Both importers recognize destination-only columns;
+no stage data is expected from Django.
+Existing graduation forms and grade sheets are retained. Their discarded
+enrollment links become historical `refresh:` groups so separate sheets do not
+collide or get reused for a subsequent enrollment. Such historical forms cannot
+automatically graduate refreshed learner data; create a new form for the new
+enrollment instead.
+
+Refreshes are for local staging only and must never be run against production.
+The command refuses environments other than `APP_ENV=local` and requires
+local MySQL source/destination connections.
+
+## Program configuration fields
 
 `programs` has these additional nullable columns:
 
@@ -248,6 +378,11 @@ as saved. Forms never change student records.
 
 **Adult Learner Graduation Initiation** (`/forms/graduation-initiation/create`):
 
+The certificate-order notice uses the **16th of each month** for both
+ordering and the submission deadline. The related invitation and grades
+reminder use the same deadline. A migration updates the old built-in
+deadline sentences in saved email templates, preserving other wording.
+
 - The learner is chosen by type-ahead (name or User ID; shows name, cohort, User ID).
 - The program list shows programs whose `type` is `cert`, ordered by description.
   It pre-fills from the learner's program when that program is in the list.
@@ -267,16 +402,21 @@ as saved. Forms never change student records.
 
 **Final Grades** (`/forms/final-grades/create`):
 
-- Stored relationally: `finalgrades` holds one sheet per learner per program
-  (`studentid`, `program_id`, `gradername`, `gradedate`, `gradenotes`, plus
+- Stored relationally: `finalgrades` holds one sheet per learner per program enrollment
+  (`studentid`, `program_id`, `enrollment_id`, `enrollment_key`, `gradername`, `gradedate`, `gradenotes`, plus
   status, revision, and signature/audit columns). `finalgradesitems` holds one
   row per graded item (`finalgradeid`, `studentid`, `gradeditemid`, `grade`
   varchar 64). A composite foreign key keeps each item's `studentid` equal to
   its sheet's learner.
 - The learner is chosen by type-ahead. Choosing a learner shows any grade sheets
   they already have (draft or submitted), newest first, with links. Choosing a
-  program that already has a sheet for that learner disables saving; the server
-  also rejects duplicates.
+  program enrollment that already has a sheet for that learner disables saving;
+  the server and database also reject duplicates. All stages of one enrollment
+  share a sheet. A return to the same program requires a new sheet. Original
+  legacy sheets and histories are retained and are never silently reused.
+- Graduation Initiation forms capture the same program enrollment; grade
+  reminders, workflow checks and automatic graduation use that captured link.
+  Existing forms retain their original enrollment when edited.
 - The program list shows only programs that have graded items. The program's
   items appear in `itemorder` order, with clock hours shown when any item has them.
 - Grades are free text (number, letter, Pass/Fail, ...), up to 64 characters.
@@ -339,6 +479,15 @@ When the last stage finishes, the run is marked **Completed** with its date.
 
 **Rules for staff stages**
 
+- Each approval (a staff stage with Yes/No questions) emails its approvers
+  once when it becomes active, with a direct link to the approval form.
+  Reminders use an editable template per stage and are recorded on the run
+  and in its history. A successful reminder is not sent again by scheduler
+  checks or pause/resume; sending the stage back reopens it and sends a new
+  reminder. Missing recipients fail the stage with an explanation; saving
+  recipients retries it. Temporary mail failures use the normal retries.
+  Existing active approvals receive their first reminder on the next
+  scheduler pass after deployment.
 - Answering **No** to any question requires a note. The run is then
   **paused** and shows the note. Anyone with access can **Resume** it; the
   stage is asked again.
@@ -350,6 +499,9 @@ When the last stage finishes, the run is marked **Completed** with its date.
 - An uploaded credential can be replaced with **Replace file**. The final
   congratulations email attaches whichever file is current when it is sent.
   Replacing the file later does not resend the email.
+  Uploads use unique private paths, retain prior versions with their audit
+  metadata, and report disk-write failures explicitly. A stale/rejected upload
+  or rolled-back replacement cannot overwrite the previous PDF.
 
 **Finance**
 
@@ -380,6 +532,9 @@ When the last stage finishes, the run is marked **Completed** with its date.
     forms;
   - the current stage's form;
   - every stage with its answers, emails and files;
+  - forms submitted early show **Submitted — waiting for earlier stages**,
+    with a submission date and link. This is display-only: the workflow
+    still processes its stages in order, and drafts do not count;
   - the history.
 - The Graduation Initiation page shows a summary panel with a link to the
   run.
@@ -390,12 +545,20 @@ When the last stage finishes, the run is marked **Completed** with its date.
 
 - Recipient lists (comma separated):
   - Finance team (default `financeteam@cgms.edu`)
+  - Records approval team (default `adminteam@cgms.edu`)
   - Admin team (default `adminteam@cgms.edu`)
   - Verified graduate information recipients
   - Alumni coordinator and marketing
 - Default links: Employer Graduate Survey, Course Completion Survey, and
   Employment Question Form.
 - The correction waiting period in days (0–60).
+- **Staff notification recipients:** optional per-stage recipient lists for
+  approvals and staff-directed emails. Blank uses the indicated team
+  default (or the submitting director's login email for the grades
+  reminder). These addresses do not grant approval permissions.
+  Learner and employer emails still use their record addresses; final
+  congratulations CC addresses still come from the program and initiation
+  form.
 - Per program, in the **Programs** table:
   - **director team email**;
   - **Course Completion Survey link**;
@@ -453,8 +616,11 @@ Nav link for records level and up.
   body with `{placeholders}`. Each template lists its placeholders.
 - Unknown placeholders and missing required links are rejected.
 - **Preview** shows sample values. **Reset** restores the original text.
-- Changes apply to emails sent afterwards; each sent email keeps a copy of its
-  text.
+- Changes apply to future drafts/sends. Workflow emails keep a copy of their
+  sent text; invoice emails record only the send date.
+- **Invoice email** supplies the editable subject/message defaults in the
+  invoice dialog. It supports learner, invoice, enrollment program/stage, and
+  logged-in sender fields; its editor lists all supported placeholders.
 
 ### Delivery, retries and the scheduler
 
@@ -560,7 +726,46 @@ Each invoice has **HTML**, **Download Current PDF**, and (when available) **Stor
 links. HTML/current PDFs use current invoice values and the current ledger.
 Stored PDFs remain byte-for-byte unchanged when invoice metadata is edited.
 Creating an invoice renders and stores its PDF in the same transaction; a
-rendering failure rolls back the invoice. No email is sent.
+rendering failure rolls back the invoice.
+
+Select **Email the stored invoice PDF after creating it** to include a message.
+The invoice/PDF is committed first, then its exact stored bytes are emailed.
+Set the shared defaults under **Email Templates → Invoice email**. Both subject
+and message can be customized per send, including retries/resends, without
+changing the shared template. Placeholders such as `{learner_first_name}`,
+`{invoice_reference}`, `{invoice_amount}`, `{invoice_due_date}`, and
+`{sender_name}` are filled into an editable subject/message preview when email
+is selected or an existing invoice's email panel is opened. New invoices use
+the current draft invoice fields; existing invoices use saved metadata.
+Only `{invoice_id}` remains deferred for a new invoice and is replaced after
+creation, without adding a separate review/send step.
+
+Staff edits are sent as composed, not re-expanded as another template; literal
+braces in learner data or custom text are preserved. **Refresh from template**
+rebuilds the preview using current values and asks before replacing edited email
+text. Changing invoice details does not overwrite that text: a notice asks staff
+to refresh or update the message themselves. Refresh also picks up changes to
+the shared template. The template editor still rejects unknown placeholders
+and supports sample previews/reset. Saved invoice metadata may differ from an
+older stored PDF if that metadata was subsequently edited.
+From and Reply-To use the logged-in user's profile email; recipients come from
+the learner's saved `emailaddr` (not the sponsor). Addresses are split on commas
+and trimmed, without application-level address validation. Save contact changes
+before creating an invoice. All recipients are included in To.
+
+**Last emailed** records the latest time the mailer accepted the message, not
+confirmed inbox delivery. There is no bounce/delivery-failure tracking or stored
+message history. Immediate send errors remain visible and do not remove the
+invoice; **Retry email only** cannot create another invoice. **Edit Invoice →
+Email stored PDF** also permits a later retry/resend without editing billing.
+Later bounces are handled through the sender's mailbox, subject to the mail
+provider's bounce/return-path configuration. The provider must authorize every
+profile From address (normally through domain authentication).
+
+A delivery mailer must be configured; log/array transports and non-delivery
+fallbacks cannot mark an invoice emailed. The array transport is allowed only
+in automated tests. No queue worker is required. Staging refreshes clear these
+local email timestamps together with the replaced billing test data.
 
 Learner details offer **HTML Statement** and **Statement PDF**, and browse-page
 balances link to the HTML statement. Previews include print/download controls.
@@ -959,6 +1164,82 @@ Django auth/session tables and unrelated `su_*` tables are not imported.
 
 To rehearse another import, create and migrate a **different empty destination**.
 There is deliberately no destructive `--force` or reset option.
+
+### Refreshing local billing data from production
+
+`billing:refresh` is a separate, deliberately destructive refresh for the local
+development database, not an Access merge or a production deployment tool.
+It defaults to a read-only database preview. It requires `APP_ENV=local` and
+local MySQL connections for both source and destination.
+
+1. Make a **full backup of the Laravel database**, including users, forms,
+   workflows, settings, and additional student/program fields. Keep it private.
+2. Obtain a fresh, consistent production SQL dump including binary PDF data
+   (`mysqldump --single-transaction --hex-blob` for InnoDB tables). Restore it
+   into a **new, separate local source database**, never into Laravel.
+   Inspect the dump first for `CREATE DATABASE` / `USE` statements so it cannot
+   select a different database during restoration.
+3. Point `LEGACY_DB_*` at that restored source and run `php artisan config:clear`.
+   Keep the source frozen; SELECT-only source credentials are recommended.
+   The command never writes to the source or connects to production.
+4. Preview and review the counts and private JSON report, including removed IDs:
+
+   ```sh
+   php artisan billing:refresh
+   ```
+
+5. Stop local queue workers and scheduled jobs, close editing sessions / release
+   student locks, and put the app into maintenance mode. Apply with the exact
+   configured database names (replace the example source name):
+
+   ```sh
+   php artisan down
+   php artisan billing:refresh --apply --source=englishbilling_fresh --target=englishbilling_laravel
+   ```
+
+6. Only after success, run `php artisan up` and restart local workers/jobs. On
+   failure, inspect the error before reopening; data/verification errors roll
+   back the refresh. A report-write failure **after commit** is explicitly
+   identified and does not roll back an already verified refresh.
+
+Rules:
+
+- Test enrollment history is discarded on every applied refresh, including
+  program enrollments, stages, audit events, current-enrollment pointers/revisions,
+  billing enrollment/stage links, and application-fee classifications.
+  Stage-duration settings and logins survive. Preview output and the private
+  JSON report list the enrollment history being discarded. This is a repeatable
+  staging reset, never a production operation.
+- Match strictly by billing primary keys, not names or emails. Local test
+  records can collide with newer production IDs: overlapping IDs are treated
+  as the same record. Review local-created records and their Laravel-only
+  fields/forms before proceeding; this is not identity resolution.
+- Production overwrites every original billing column on matching IDs and
+  inserts new rows. Local-only rows in the eight non-program billing tables
+  are removed, child tables first. This includes local-only historical PDFs.
+- Existing programs retain **all** Laravel values, including code, description,
+  service days, and added fields. Missing production programs are inserted;
+  local-only programs are retained. The report lists differences. Consequently
+  locally changed service days can intentionally change report calculations.
+- Added student fields (including `originalcohort`, except the reset enrollment
+  pointers/revisions) survive on matching IDs.
+  New production students get null added fields. Shared student fields such as
+  cohort, email, phone, and sponsorship are overwritten from production; this
+  is not the previously discussed Access merging policy.
+- Users, passwords, roles, settings, forms, workflows, and other Laravel-only
+  tables (except the explicitly discarded enrollment history) are not refreshed.
+  If deleting a local-only billing row would affect
+  any foreign-key-linked Laravel-only data (even via SET NULL or CASCADE), the
+  entire operation is refused for manual resolution. Existing student edit
+  locks also prevent applying the refresh; it never silently releases locks.
+- Monetary conversion, ledger balance rebuilding, binary PDF verification,
+  row hashes, and transactional rollback reuse the initial import machinery.
+  All mirrored tables must match the source before commit, except rebuilt
+  student balances and intentionally preserved programs/added columns.
+- Schema mismatches and an empty source student table are refused. The preview
+  counts rows that will be overwritten, not only rows whose values differ.
+  Private reports are saved under `storage/app/private/imports/refresh-*.json`.
+  The original `billing:import` still refuses populated destinations.
 
 ### Verified local snapshot
 

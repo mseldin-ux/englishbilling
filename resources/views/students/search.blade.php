@@ -15,6 +15,22 @@
             <input name="transaction_type" value="{{ $filters['transaction_type'] ?? '' }}">
         </label>
         <label>Cohort <input name="cohort" value="{{ $filters['cohort'] ?? '' }}"></label>
+        <label>Program (including history)
+            <select name="program_id"><option value="">All</option>
+                @foreach(\App\Models\Program::orderBy('id')->get() as $searchProgram)
+                    <option value="{{ $searchProgram->id }}" @selected(($filters['program_id'] ?? '') == $searchProgram->id)>{{ $searchProgram->program }}</option>
+                @endforeach
+            </select>
+        </label>
+        <label>Stage (including completed)
+            <select name="stage"><option value="">All</option>@foreach(\App\Billing\Enrollments::STAGES as $number => $label)
+                <option value="{{ $number }}" @selected(($filters['stage'] ?? '') == $number)>{{ $number }} — {{ $label }}</option>
+            @endforeach</select>
+        </label>
+        <label>Program or stage started from <input type="date" name="start_from" value="{{ $filters['start_from'] ?? '' }}"></label>
+        <label>through <input type="date" name="start_to" value="{{ $filters['start_to'] ?? '' }}"></label>
+        <label>Stage started from <input type="date" name="stage_start_from" value="{{ $filters['stage_start_from'] ?? '' }}"></label>
+        <label>through <input type="date" name="stage_start_to" value="{{ $filters['stage_start_to'] ?? '' }}"></label>
     </div>
     <fieldset><legend>Status (all selected filters must match)</legend>
         @foreach(['active'=>'Active','extension'=>'Extension','grad'=>'Graduated','ingroup'=>'In Group',

@@ -16,7 +16,8 @@ final class ReceivablesReport
                 ->select('t.student_id', 't.transactionamount', 's.first_name', 's.middle_name', 's.last_name')
                 ->orderBy('t.transactiondate')->orderBy('t.id');
             if (! empty($filters['startdate'])) {
-                $query->where('s.start_date', '>=', $filters['startdate']);
+                $query->leftJoin('student_enrollments as e', 'e.id', '=', 't.enrollment_id')
+                    ->whereRaw('CASE WHEN t.enrollment_id IS NULL THEN s.start_date ELSE e.started_on END >= ?', [$filters['startdate']]);
             }
             if (! empty($filters['enddate'])) {
                 $query->where('t.transactiondate', '<', $filters['enddate'])->where('t.processeddate', '<', $filters['enddate']);

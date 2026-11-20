@@ -14,6 +14,8 @@ use InvalidArgumentException;
 class Settings
 {
     public const DEFINITIONS = [
+        'records_email' => ['label' => 'Records approval team', 'type' => 'emails', 'default' => 'adminteam@cgms.edu',
+            'help' => 'Notified once when a Records approval becomes active. Individual stages can override this address below.'],
         'finance_email' => ['label' => 'Finance team', 'type' => 'emails', 'default' => 'financeteam@cgms.edu',
             'help' => 'Asked to clear each Adult Learner financially, and sent international mailing requests.'],
         'admin_team_email' => ['label' => 'Admin team', 'type' => 'emails', 'default' => 'adminteam@cgms.edu',
@@ -56,13 +58,36 @@ class Settings
         return EmailStep::addresses((string) self::get($key));
     }
 
+    /** Staff email stages with configurable recipients; personal learner/employer addresses are not overridden. */
+    public const STAFF_EMAILS = [
+        'remind-director' => null,
+        'notify-finance-international' => 'finance_email',
+        'request-finance-clearance' => 'finance_email',
+        'send-verified-info' => 'graduate_info_recipients',
+        'notify-admin-status-sheets' => 'admin_team_email',
+        'notify-alumni' => 'alumni_recipients',
+        'notify-wait-over' => 'admin_team_email',
+        'notify-complete' => 'admin_team_email',
+    ];
+
+    /** @return array<int, string>|null */
+    public static function staffRecipients(string $workflow, string $step): ?array
+    {
+        if ($workflow !== 'course-completion' || ! array_key_exists($step, self::STAFF_EMAILS)) {
+            return null;
+        }
+        $override = self::stage($workflow, $step)['recipients'] ?? '';
+
+        return $override !== '' ? EmailStep::addresses($override) : null;
+    }
+
     public static function put(string $key, mixed $value, ?User $user): void
     {
         DB::table('app_settings')->updateOrInsert(['key' => $key],
             ['value' => json_encode($value), 'updated_by' => $user?->id, 'updated_at' => now(), 'created_at' => now()]);
     }
 
-    /** @return array{title?: string, instructions?: string, labels?: array<string, string>} */
+    /** @return array{title?: string, instructions?: string, labels?: array<string, string>, recipients?: string} */
     public static function stage(string $workflow, string $step): array
     {
         $row = DB::table('app_settings')->where('key', "stage:{$workflow}:{$step}")->value('value');
@@ -70,10 +95,11 @@ class Settings
         return $row === null ? [] : (json_decode($row, true) ?: []);
     }
 
-    /** Saves stage text overrides; empty values fall back to the built-in text. */
+    /** Saves stage text and recipient overrides; empty values use defaults. */
     public static function putStage(string $workflow, string $step, array $override, ?User $user): void
     {
         $override = array_filter([
+            'recipients' => trim((string) ($override['recipients'] ?? '')),
             'title' => trim((string) ($override['title'] ?? '')),
             'instructions' => trim(str_replace("\r\n", "\n", (string) ($override['instructions'] ?? ''))),
             'labels' => array_filter(array_map(fn ($label) => trim((string) $label), $override['labels'] ?? [])),

@@ -19,6 +19,19 @@
             @error("settings.$key")<p class="workflow-failed">{{ $message }}</p>@enderror
         @endforeach
     </fieldset>
+    <fieldset><legend>Staff notification recipients</legend>
+        <p class="hint">Approval reminders are sent once when the approval becomes active. Blank fields use the team default shown below.
+            Learner and employer messages still use the addresses on their records. These settings change recipients, not access permissions.</p>
+        @foreach($notifications as $workflow => $steps)
+            @foreach($steps as $key => $notification)
+                <label>{{ $notification['step']->title() }}
+                    <input type="text" name="notifications[{{ $workflow }}][{{ $key }}]" maxlength="2000"
+                        value="{{ old("notifications.$workflow.$key", \App\Workflows\Settings::stage($workflow, $key)['recipients'] ?? '') }}">
+                </label>
+                <p class="hint">Default: {{ $notification['fallback'] }}</p>
+            @endforeach
+        @endforeach
+    </fieldset>
     <fieldset><legend>Programs</legend>
         <p class="hint">Director team emails are CC'd on the final congratulations email. A blank link uses the default link above.</p>
         <table class="forms-table">

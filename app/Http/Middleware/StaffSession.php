@@ -35,8 +35,12 @@ class StaffSession
                 $activeSession = $id;
             }
 
-            return $next($request);
+            // External mail must not run inside the automatically retried transaction.
+            return $request->routeIs('invoices.email') ? null : $next($request);
         }, 3);
+        if ($response === null) {
+            $response = $next($request);
+        }
         if ($activeSession !== null) {
             // Renew after commit to avoid taking lease locks before student-row locks.
             DB::table('student_edit_locks')->where('session_id', $activeSession)->update(['last_activity' => now()->timestamp]);

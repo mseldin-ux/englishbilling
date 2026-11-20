@@ -1,5 +1,6 @@
 @include('students.lock-notice')
 <div class="schedule-editor" data-fees="{{ $fees }}">
+@if($student->current_enrollment_id)<p>This schedule and its fee total apply only to the current program/stage. Prior schedules are retained in the database.</p>@endif
 <p>TOTAL FEES: {{ $fees }} | <span class="remaining-amount"></span></p>
 <form id="schedule-generator" method="post" action="{{ route('schedule.generate', $student) }}">
     @csrf
@@ -8,15 +9,18 @@
             @foreach($templates as $template)<option value="{{ $template->id }}">{{ $template->paymentplan }} — {{ $template->paymentplandesc }}</option>@endforeach
         </select>
     </label>
-    <label>Start Date <input type="date" name="start_date" value="{{ $student->start_date?->format('Y-m-d') }}" required></label>
+    <label>Start Date <input type="date" name="start_date" value="{{ $startDate?->format('Y-m-d') }}" required></label>
     <label class="inline"><input type="checkbox" name="exclude_app_fee" value="1" checked> Do not include app fee</label>
-    <label class="inline">$ <input name="app_fee" class="compact" value="100.00" inputmode="decimal"></label>
+    <label class="inline">$ <input name="app_fee" class="compact" value="{{ $appFee }}" inputmode="decimal"></label>
     <button>Create Plan</button>
     <span class="form-status" role="status"></span>
 </form>
 <form id="schedule-form" method="post" action="{{ route('schedule.save', $student) }}" data-dirty>
     @csrf @method('PUT')
     <input type="hidden" name="version" value="{{ $version }}">
+    @if($student->current_enrollment_id)
+        <p>Program / Stage: {{ \App\Billing\EnrollmentAttribution::options($student)[implode(':', \App\Billing\EnrollmentAttribution::current($student))] }}</p>
+    @endif
     <label>Description <textarea name="paymentplandesc" rows="2">{{ $plan?->paymentplandesc }}</textarea></label>
     <div class="table-scroll">
     <table>

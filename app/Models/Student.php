@@ -11,6 +11,8 @@ class Student extends BillingModel
 {
     protected $table = 'students';
 
+    protected $attributes = ['enrollment_revision' => 0];
+
     protected function accessChangeDate(): Attribute
     {
         return Attribute::make(
@@ -57,6 +59,33 @@ class Student extends BillingModel
     public function program(): BelongsTo
     {
         return $this->belongsTo(Program::class);
+    }
+
+    public function enrollments(): HasMany
+    {
+        return $this->hasMany(StudentEnrollment::class)->orderBy('id');
+    }
+
+    public function currentEnrollment(): BelongsTo
+    {
+        return $this->belongsTo(StudentEnrollment::class, 'current_enrollment_id');
+    }
+
+    public function stageSummary(): string
+    {
+        $enrollment = $this->currentEnrollment;
+        if (! $enrollment || $enrollment->mode !== 'staged') {
+            return '';
+        }
+        $stage = $enrollment->stages->last();
+        if (! $stage) {
+            return 'Awaiting stage enrollment';
+        }
+        if ($enrollment->status === 'graduated') {
+            return 'Graduated';
+        }
+
+        return 'Stage '.$stage->stage.($stage->completed_on ? ' done' : ' — '.$stage->status.' since '.$stage->started_on->format('Y-m-d'));
     }
 
     public function transactions(): HasMany

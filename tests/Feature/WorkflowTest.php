@@ -5,6 +5,7 @@ namespace Tests\Feature;
 use App\Mail\TemplatedMail;
 use App\Models\CourseCompletion;
 use App\Models\CourseCompletionInvitation;
+use App\Models\FinalGrade;
 use App\Models\FormData;
 use App\Models\GradedItem;
 use App\Models\Program;
@@ -12,13 +13,17 @@ use App\Models\Student;
 use App\Models\User;
 use App\Models\WorkflowRun;
 use App\Models\WorkflowStep;
+use App\Workflows\EmailTemplates;
 use App\Workflows\Settings;
 use App\Workflows\Workflows;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Validation\ValidationException;
 use Illuminate\Testing\TestResponse;
+use Symfony\Component\Mailer\Exception\TransportException;
 use Tests\TestCase;
 
 class WorkflowTest extends TestCase
@@ -35,6 +40,7 @@ class WorkflowTest extends TestCase
     {
         parent::setUp();
         Mail::fake();
+        Storage::fake('local');
         config(['workflows.portal_url' => 'https://portal.example.org']);
         $this->program = new Program;
         $this->program->forceFill(['program' => 'EL I Full', 'programdesc' => 'EL I Full', 'type' => 'cert', 'servicedays' => 100])->save();
@@ -134,6 +140,214 @@ class WorkflowTest extends TestCase
         $this->post('/forms/graduation-initiation', [...$this->complete(['instructor_email' => 'maria@example.org']), 'action' => 'submit'])->assertRedirect();
         $this->post('/course-completion/'.$this->token(), $this->completion(['address_in_us' => '0', 'mailing_address' => '5 Rue X, Paris, France']))->assertRedirect();
         $this->sheet();
+    }
+
+    private function uploadStep(): WorkflowStep
+    {
+        $this->actingAs($this->director);
+        $form = FormData::create(['form_type' => 'graduation-initiation', 'student_id' => $this->student->id,
+            'program_id' => $this->program->id, 'data' => []]);
+        $run = WorkflowRun::create(['workflow' => 'course-completion', 'subject_type' => 'formsdata', 'subject_id' => $form->id,
+            'student_id' => $this->student->id, 'program_id' => $this->program->id, 'status' => 'active', 'current_step' => 'credential-upload']);
+
+        return WorkflowStep::create(['workflow_run_id' => $run->id, 'step' => 'credential-upload', 'position' => 1, 'status' => 'done']);
+    }
+
+    public function test_rejected_stale_upload_cannot_overwrite_the_accepted_credential(): void
+    {
+        $step = $this->uploadStep();
+        $stale = $step->fresh()->load('run');
+        $stale->status = 'waiting';
+        Workflows::replaceFile($step, 'credential', $this->pdf('accepted.pdf'), $this->director);
+        $accepted = $step->fresh()->data['answers']['credential'];
+        $bytes = Storage::disk('local')->get($accepted['path']);
+        try {
+            Workflows::complete($stale, ['answers' => ['credential' => $this->pdf('rejected.pdf')]], $this->director);
+            $this->fail('A stale upload must be rejected.');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('stage', $exception->errors());
+        }
+        $this->assertSame($accepted, $step->fresh()->data['answers']['credential']);
+        $this->assertSame($bytes, Storage::disk('local')->get($accepted['path']));
+        $this->assertCount(1, Storage::disk('local')->allFiles());
+    }
+
+    public function test_replacement_retains_old_versions_and_database_rollback_cannot_destroy_the_original(): void
+    {
+        $step = $this->uploadStep();
+        Workflows::replaceFile($step, 'credential', $this->pdf('original.pdf'), $this->director);
+        $original = $step->fresh()->data['answers']['credential'];
+        try {
+            DB::transaction(function () use ($step) {
+                Workflows::replaceFile($step, 'credential', $this->pdf('rolled-back.pdf'), $this->director);
+                throw new \RuntimeException('Synthetic database rollback');
+            });
+        } catch (\RuntimeException $exception) {
+            $this->assertSame('Synthetic database rollback', $exception->getMessage());
+        }
+        $this->assertSame($original, $step->fresh()->data['answers']['credential']);
+        Storage::disk('local')->assertExists($original['path']);
+        Workflows::replaceFile($step, 'credential', $this->pdf('replacement.pdf'), $this->director);
+        $replacement = $step->fresh()->data['answers']['credential'];
+        $this->assertNotSame($original['path'], $replacement['path']);
+        Storage::disk('local')->assertExists([$original['path'], $replacement['path']]);
+        $event = $step->run->events()->where('action', 'file-replaced')->reorder('id', 'desc')->first();
+        $this->assertSame($original, $event->data['previous']);
+    }
+
+    public function test_failed_disk_write_does_not_replace_a_saved_credential_or_report_success(): void
+    {
+        $step = $this->uploadStep();
+        Workflows::replaceFile($step, 'credential', $this->pdf(), $this->director);
+        $original = $step->fresh()->data;
+        $disk = \Mockery::mock(\Illuminate\Filesystem\FilesystemAdapter::class);
+        $disk->shouldReceive('putFileAs')->once()->andReturn(false);
+        Storage::shouldReceive('disk')->with('local')->once()->andReturn($disk);
+        try {
+            Workflows::replaceFile($step, 'credential', $this->pdf('failed.pdf'), $this->director);
+            $this->fail('A failed write must be reported.');
+        } catch (ValidationException $exception) {
+            $this->assertArrayHasKey('file', $exception->errors());
+        }
+        $this->assertSame($original, $step->fresh()->data);
+    }
+
+    public function test_approval_notifications_are_sent_once_on_activation_and_logged_with_a_link(): void
+    {
+        Settings::putStage('course-completion', 'records-review', ['recipients' => 'review+test@example.org'], null);
+        $this->throughFinalGrades();
+        $run = $this->workflowRun();
+        $finance = $this->step('finance-clearance');
+        $this->assertSame('waiting', $finance->status);
+        $this->assertSame(['financeteam@cgms.edu'], $finance->data['approval_notification']['recipients']);
+        $this->assertArrayNotHasKey('approval_notification', $this->step('records-review')->data ?? []);
+        $sent = Mail::sent(TemplatedMail::class)->count();
+        Workflows::runPending();
+        Workflows::advance($run->id);
+        $this->assertSame($sent, Mail::sent(TemplatedMail::class)->count());
+
+        $this->actingAs(User::factory()->create(['is_admin' => true]));
+        $this->answer('finance-clearance', ['cleared' => 'yes'])->assertRedirect();
+        $records = $this->step('records-review');
+        $this->assertSame('waiting', $records->status);
+        $this->assertSame(['review+test@example.org'], $records->data['approval_notification']['recipients']);
+        Mail::assertSent(TemplatedMail::class, fn ($mail) => $mail->hasTo('review+test@example.org')
+            && str_contains($mail->textBody, '/workflows/runs/'.$run->id.'#current-stage'));
+        $this->assertDatabaseHas('workflow_events', ['workflow_run_id' => $run->id, 'step' => 'records-review',
+            'action' => 'sent', 'note' => 'Approval reminder sent.']);
+        $this->get('/workflows/runs/'.$run->id)->assertOk()->assertSee('Approval reminder sent')->assertSee('review+test@example.org');
+        $this->get('/email-templates/course-completion-records-review-approval')->assertOk()->assertSee('approval_link');
+    }
+
+    public function test_missing_approval_recipients_fail_and_settings_recovery_sends_once(): void
+    {
+        $this->throughFinalGrades();
+        Settings::put('finance_email', '', null);
+        $admin = User::factory()->create(['is_admin' => true]);
+        $this->actingAs($admin);
+        $this->post('/workflows/runs/'.$this->workflowRun()->id.'/send-back',
+            ['step' => 'finance-clearance', 'note' => 'Testing missing approval recipients', 'confirm' => '1'])->assertRedirect();
+        $approval = $this->step('finance-clearance');
+        $this->assertSame('failed', $approval->status);
+        $this->assertStringContainsString('No approval recipients', $approval->error);
+        $values = [];
+        foreach (array_keys(Settings::DEFINITIONS) as $key) {
+            $values[$key] = Settings::get($key);
+        }
+        $this->put('/admin/workflow-settings', ['settings' => $values,
+            'notifications' => ['course-completion' => ['finance-clearance' => 'finance+test@example.org']]])
+            ->assertRedirect('/admin/workflow-settings')->assertSessionHasNoErrors();
+        $this->assertSame('waiting', $approval->refresh()->status);
+        $this->assertSame(['finance+test@example.org'], $approval->data['approval_notification']['recipients']);
+        $sent = Mail::sent(TemplatedMail::class)->count();
+        Workflows::runPending();
+        $this->assertSame($sent, Mail::sent(TemplatedMail::class)->count());
+    }
+
+    public function test_staff_recipient_overrides_are_validated_preserved_and_do_not_redirect_learner_mail(): void
+    {
+        $this->actingAs(User::factory()->create(['is_admin' => true]));
+        $values = [];
+        foreach (array_keys(Settings::DEFINITIONS) as $key) {
+            $values[$key] = Settings::get($key);
+        }
+        $this->put('/admin/workflow-settings', ['settings' => $values,
+            'notifications' => ['course-completion' => ['remind-director' => 'not-an-address']]])
+            ->assertSessionHasErrors('notifications.course-completion.remind-director');
+        $this->put('/admin/workflow-settings', ['settings' => $values,
+            'notifications' => ['course-completion' => ['remind-director' => 'director+test@example.org',
+                'records-review' => 'records+test@example.org']],
+            'stages' => ['course-completion' => ['records-review' => ['title' => 'Custom review']]]])
+            ->assertSessionHasNoErrors();
+        $this->assertSame('Custom review', Settings::stage('course-completion', 'records-review')['title']);
+        $this->assertSame('records+test@example.org', Settings::stage('course-completion', 'records-review')['recipients']);
+        $this->put('/admin/workflow-settings', ['settings' => $values,
+            'stages' => ['course-completion' => ['records-review' => ['title' => 'Another review']]]])
+            ->assertSessionHasNoErrors();
+        $this->assertSame('records+test@example.org', Settings::stage('course-completion', 'records-review')['recipients']);
+        $this->submitGraduation();
+        Mail::assertSent(TemplatedMail::class, fn ($mail) => $mail->hasTo('director+test@example.org'));
+        Mail::assertSent(TemplatedMail::class, fn ($mail) => $mail->hasTo('ada@example.org')
+            && str_contains($mail->textBody, '/course-completion/'));
+        $this->actingAs(User::factory()->create(['is_admin' => true]));
+        $this->get('/admin/workflow-settings')->assertOk()->assertSee('Staff notification recipients')
+            ->assertSee('records+test@example.org');
+    }
+
+    public function test_early_final_grades_are_visible_without_advancing_past_the_learner_form(): void
+    {
+        $this->submitGraduation();
+        $run = $this->workflowRun();
+        $this->get('/workflows/runs/'.$run->id)->assertOk()->assertDontSee('Submitted — waiting for earlier stages');
+        $this->sheet();
+        $this->assertSame('await-course-completion', $run->fresh()->current_step);
+        $this->assertSame('upcoming', $this->step('await-final-grades')->status);
+        $sheet = FinalGrade::firstOrFail();
+        $page = $this->get('/workflows/runs/'.$run->id)->assertOk()->assertSee('Submitted — waiting for earlier stages')
+            ->assertSee(route('forms.grades.edit', $sheet), false)
+            ->assertSee($sheet->submitted_at->setTimezone(config('app.timezone'))->format('Y-m-d H:i'));
+        $stage = $page->viewData('stages')->first(fn ($stage) => $stage->step->step === 'await-final-grades');
+        $this->assertNotNull($stage->earlySubmission);
+        $this->post('/course-completion/'.$this->token(), $this->completion())->assertRedirect();
+        $this->assertSame('done', $this->step('await-final-grades')->status);
+    }
+
+    public function test_temporary_approval_mail_failure_retries_without_finishing_the_approval(): void
+    {
+        $this->throughFinalGrades();
+        $this->actingAs(User::factory()->create(['is_admin' => true]));
+        $manager = app('mail.manager');
+        Mail::shouldReceive('to')->once()->andThrow(new TransportException('Connection unavailable'));
+        $this->answer('finance-clearance', ['cleared' => 'yes'])->assertRedirect();
+        $records = $this->step('records-review');
+        $this->assertSame('failed', $records->status);
+        $this->assertNotNull($records->available_at);
+        $this->assertArrayNotHasKey('approval_notification', $records->data ?? []);
+        Mail::swap($manager);
+        Mail::fake();
+        $this->travel(2)->minutes();
+        Workflows::runPending();
+        $this->assertSame('waiting', $records->fresh()->status);
+        $this->assertNull($records->completed_at);
+        $this->assertSame('records-review', $this->workflowRun()->current_step);
+        Mail::assertSent(TemplatedMail::class, 1);
+        Workflows::runPending();
+        Mail::assertSent(TemplatedMail::class, 1);
+    }
+
+    public function test_certificate_deadline_migration_preserves_other_saved_template_wording(): void
+    {
+        $template = EmailTemplates::get('final-grades-reminder');
+        $template->forceFill(['body' => "Custom introduction.\nCertificates are ordered on the 10th of each month. Please complete the Final Grades form by the 10th of the month for the certificate to be ordered.\nCustom signature."])->save();
+        $migration = require database_path('migrations/2026_11_11_000001_update_certificate_order_deadline.php');
+        $migration->up();
+        $body = $template->fresh()->body;
+        $this->assertStringContainsString('Certificates are ordered on the 16th', $body);
+        $this->assertStringContainsString('form by the 16th', $body);
+        $this->assertStringContainsString('Custom introduction.', $body);
+        $this->assertStringContainsString('Custom signature.', $body);
+        $migration->down();
+        $this->assertStringContainsString('Certificates are ordered on the 10th', $template->fresh()->body);
     }
 
     public function test_submitting_starts_the_workflow_and_waits_for_the_learner(): void
@@ -369,7 +583,7 @@ class WorkflowTest extends TestCase
         $this->post('/workflows/runs/'.$run->id.'/send-back', ['step' => 'request-finance-clearance', 'note' => 'Balance changed', 'confirm' => '1'])->assertRedirect();
         $this->assertSame('finance-clearance', $this->workflowRun()->current_step);
         $this->assertSame(['upcoming', 'upcoming'], [$this->step('records-review')->status, $this->step('credential-ready')->status]);
-        $this->assertSame($sent + 1, Mail::sent(TemplatedMail::class)->count());
+        $this->assertSame($sent + 2, Mail::sent(TemplatedMail::class)->count());
         $this->answer('finance-clearance', ['cleared' => 'yes'])->assertRedirect();
 
         $this->post('/workflows/steps/'.$this->step('records-review')->id.'/skip', ['note' => 'Reviewed on paper', 'confirm' => '1'])->assertRedirect();

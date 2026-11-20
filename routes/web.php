@@ -6,6 +6,7 @@ use App\Http\Controllers\CourseCompletionController;
 use App\Http\Controllers\CourseCompletionPortalController;
 use App\Http\Controllers\DocumentController;
 use App\Http\Controllers\EmailTemplateController;
+use App\Http\Controllers\EnrollmentController;
 use App\Http\Controllers\FinalGradesController;
 use App\Http\Controllers\FormsController;
 use App\Http\Controllers\LockController;
@@ -112,6 +113,9 @@ Route::middleware(['auth', 'user-access', 'staff-session'])->group(function () {
     Route::post('/admin/locks/release', [LockController::class, 'forceRelease'])->middleware('admin')->name('locks.force-release');
     Route::resource('users', UserController::class)->except('show')->middleware('admin');
     Route::get('/browse', [StudentController::class, 'index'])->name('students.index');
+    Route::post('/students/{student}/enrollments', [EnrollmentController::class, 'store'])->middleware('student-lock')->name('enrollments.store');
+    Route::get('/admin/stage-settings', [EnrollmentController::class, 'settings'])->middleware('admin')->name('enrollments.settings');
+    Route::put('/admin/stage-settings', [EnrollmentController::class, 'saveSettings'])->middleware('admin')->name('enrollments.settings.save');
     Route::get('/reports', [ReportController::class, 'index'])->name('reports.index');
     Route::get('/reports/attributable-income', [ReportController::class, 'attributable'])->name('reports.attributable');
     Route::get('/reports/expected-income', [ReportController::class, 'expected'])->name('reports.expected');
@@ -128,6 +132,8 @@ Route::middleware(['auth', 'user-access', 'staff-session'])->group(function () {
     Route::post('/students/{student}/archive', [StudentController::class, 'archive'])->middleware('student-lock')->name('students.archive');
     Route::post('/balances/recalculate', [StudentController::class, 'recalculate'])->name('balances.recalculate');
     Route::get('/students/{student}/invoices/{invoice}/pdf', [BillingRecordController::class, 'pdf'])->name('invoices.pdf');
+    Route::post('/students/{student}/invoices/email-preview', [BillingRecordController::class, 'emailPreview'])->middleware('student-lock')->name('invoices.email-preview');
+    Route::post('/students/{student}/invoices/{invoice}/email', [BillingRecordController::class, 'email'])->middleware(['student-lock', 'throttle:6,1'])->name('invoices.email');
     Route::get('/students/{student}/invoices/{invoice}/html', [DocumentController::class, 'invoice'])->name('invoices.html');
     Route::get('/students/{student}/invoices/{invoice}/current-pdf', [DocumentController::class, 'invoice'])->name('invoices.current-pdf');
     Route::get('/students/{student}/statement', [DocumentController::class, 'statement'])->name('statements.html');

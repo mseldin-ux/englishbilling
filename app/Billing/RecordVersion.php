@@ -27,7 +27,7 @@ final class RecordVersion
                 default => (string) $value,
             };
         }
-        unset($attributes['invoice_file'], $attributes['has_pdf']);
+        unset($attributes['invoice_file'], $attributes['has_pdf'], $attributes['emailed_at']);
         if ($model instanceof Student) {
             unset($attributes['balance']);
         }

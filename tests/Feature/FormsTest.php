@@ -99,7 +99,7 @@ class FormsTest extends TestCase
             }
         }
         $this->getJson('/forms/learners?q=Ada')->assertOk()
-            ->assertExactJson(['learners' => [['id' => $this->student->id, 'name' => 'Ada Learner', 'cohort' => 'EL-2026', 'program_id' => $this->cert->id]]]);
+            ->assertExactJson(['learners' => [['id' => $this->student->id, 'name' => 'Ada Learner', 'cohort' => 'EL-2026', 'program_id' => $this->cert->id, 'enrollments' => []]]]);
         $form = $this->draft();
         $this->lockForm($form);
         $this->put('/forms/'.$form->id, [...$this->complete(), 'revision' => 1, 'action' => 'submit'])->assertRedirect();
@@ -113,7 +113,7 @@ class FormsTest extends TestCase
             $this->actingAs(User::factory()->create(['access_level' => $level]));
             $this->get('/forms')->assertOk();
             $this->get('/forms/graduation-initiation/create?student='.$this->student->id)->assertOk()
-                ->assertSee('Ada Learner')->assertSee('Certificates will be ordered on the 10th of each month.');
+                ->assertSee('Ada Learner')->assertSee('Certificates will be ordered on the 16th of each month.');
             $this->assertSame($this->cert->id, $this->get('/forms/graduation-initiation/create?student='.$this->student->id)
                 ->viewData('values')['program_id']);
             $this->get($level === 'records' ? '/records' : '/browse')->assertSee('href="'.route('forms.index').'"', false);

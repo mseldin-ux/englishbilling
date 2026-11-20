@@ -115,12 +115,24 @@
             <td>{{ $step->position }}</td>
             <td>{{ $stage->title }}@if($stage->waitingOn && $stage->waitingOn !== 'System')<br><span class="hint">{{ $stage->waitingOn }}</span>@endif</td>
             <td>{{ $stage->kind }}</td>
-            <td @class(['workflow-failed' => $step->status === 'failed'])>{{ $step->statusLabel() }}
+            <td @class(['workflow-failed' => $step->status === 'failed'])>{{ $stage->earlySubmission !== null ? 'Submitted — waiting for earlier stages' : $step->statusLabel() }}
                 @if($step->status === 'failed' && $step->error)<br><span class="hint">{{ $step->error }}</span>@endif
                 @if($step->status === 'scheduled')<br><span class="hint">until {{ $fmt($step->available_at) }}</span>@endif
                 @if($step->status === 'skipped' && ($data['skip_note'] ?? null))<br><span class="hint">{{ $data['skip_note'] }}</span>@endif</td>
             <td>{{ $fmt($step->completed_at) }}@if($step->completer)<br><span class="hint">{{ $step->completer->name }}</span>@endif</td>
             <td>
+                @if($stage->earlySubmission !== null)
+                    @foreach($stage->context as $label => $value)
+                        <p>{{ $label }}: @if(is_array($value))<a href="{{ $value[1] }}">{{ $value[0] }}</a>@else{{ $value }}@endif</p>
+                    @endforeach
+                @endif
+                @if($data['approval_notification'] ?? null)
+                    <details><summary>Approval reminder sent {{ $fmt($data['approval_notification']['sent_at']) }}
+                        to {{ implode(', ', $data['approval_notification']['recipients']) }}.</summary>
+                        <p><strong>{{ $data['approval_notification']['subject'] }}</strong></p>
+                        <div class="template-preview">{{ $data['approval_notification']['body'] }}</div>
+                    </details>
+                @endif
                 @if($step->subject)
                     <details><summary>To {{ implode(', ', $step->recipients ?? []) }}@if($data['cc'] ?? [])<br>CC {{ implode(', ', $data['cc']) }}@endif</summary>
                         <p><strong>{{ $step->subject }}</strong>@if($data['attachments'] ?? [])<br>Attachments: {{ implode(', ', $data['attachments']) }}@endif</p>

@@ -2,7 +2,6 @@
 
 namespace App\Billing;
 
-use App\Models\Student;
 use Brick\Math\BigDecimal;
 use Brick\Math\BigRational;
 use Brick\Math\RoundingMode;
@@ -18,31 +17,41 @@ final class EarnedIncome
     public static function run(array $filters): array
     {
         return DB::transaction(function () use ($filters) {
-            $students = Student::where('start_date', '>=', $filters['startdate'])
-                ->where('start_date', '<', $filters['lastpossiblestartdate'])
-                ->where(fn ($query) => $query->where('graddate', '>=', $filters['startdate'])->orWhereNull('graddate'))
+            $students = EnrollmentAccounting::reportStudents($filters)
                 ->with(['program', 'loas'])->orderBy('id')->get();
-            $fees = [];
+            $students->filter(fn ($student) => $student->current_enrollment_id)->load('enrollments.stages', 'enrollments.events');
+            $fees = $transactions = [];
             foreach (array_chunk($students->modelKeys(), 300) as $ids) {
                 $query = DB::table('studenttransactions')->whereIn('student_id', $ids)
                     ->whereIn(DB::raw('LOWER(transactiontype)'), ['fee', 'declined fee'])
-                    ->whereNotNull('transactionamount')->select('student_id', 'transactionamount')->orderBy('id');
+                    ->whereNotNull('transactionamount')->select('student_id', 'transactionamount', 'transactiontype',
+                        'enrollment_id', 'stage_enrollment_id', 'recognition')->orderBy('id')
+                    ->where(function ($query) use ($filters) {
+                        $query->whereNull('enrollment_id')
+                            ->orWhereIn('enrollment_id', DB::table('student_enrollments')->where('mode', 'legacy')->select('id'))
+                            ->orWhere('transactiondate', '<', $filters['dateasof']);
+                    });
                 foreach ($query->cursor() as $transaction) {
                     $amount = (string) BigDecimal::of((string) $transaction->transactionamount)->abs()->toScale(2);
                     $fees[$transaction->student_id] = Money::add($fees[$transaction->student_id] ?? '0.00', $amount);
+                    $transactions[$transaction->student_id][] = $transaction;
                 }
             }
             $rows = [];
             $totalInvoiced = '0.00';
             $totalEarned = $totalUnearned = BigRational::of(0);
             foreach ($students as $student) {
-                $progress = ProgramProgress::calculate($student, $filters['dateasof']);
+                $progress = EnrollmentAccounting::displayProgress($student, $filters['dateasof']);
                 // The legacy "skip zero balance" option actually excludes zero service ratios.
-                if (($filters['skipzero'] ?? '') === 'yes' && $progress['ratio']->isZero()) {
+                if (! $student->current_enrollment_id && ($filters['skipzero'] ?? '') === 'yes' && $progress['ratio']->isZero()) {
                     continue;
                 }
                 $invoiced = $fees[$student->id] ?? '0.00';
-                $earned = BigRational::of($invoiced)->multipliedBy($progress['ratio']);
+                $earned = EnrollmentAccounting::earned($student, $transactions[$student->id] ?? [], $filters['dateasof'],
+                    fn (array $types) => Money::add($types['fee'] ?? '0.00', $types['declined fee'] ?? '0.00'));
+                if ($student->current_enrollment_id && ($filters['skipzero'] ?? '') === 'yes' && $earned->isZero()) {
+                    continue;
+                }
                 $unearned = BigRational::of($invoiced)->minus($earned);
                 $totalInvoiced = Money::add($totalInvoiced, $invoiced);
                 $totalEarned = $totalEarned->plus($earned);

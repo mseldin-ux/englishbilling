@@ -23,7 +23,7 @@
 <div style="overflow:auto">
 <table id="records-table" data-locks="{{ route('workspace.table-locks') }}"
     data-export="{{ route('workspace.export', ['filters' => $filters]) }}">
-    <thead><tr><th><input type="checkbox" id="select-page" aria-label="Select all rows on this page"></th><th>User ID</th><th>Actions / Lock</th>@foreach($fields as $field)<th>{{ $field[0] }}</th>@endforeach</tr></thead>
+    <thead><tr><th><input type="checkbox" id="select-page" aria-label="Select all rows on this page"></th><th>User ID</th><th>Actions / Lock</th><th>Stage (read only)</th>@foreach($fields as $field)<th>{{ $field[0] }}</th>@endforeach</tr></thead>
     <tbody>
     @foreach($students as $student)
         @php $values = \App\Billing\RecordsFields::values($student); @endphp
@@ -37,6 +37,7 @@
                 <button type="button" data-cancel hidden>Cancel / Done</button>
                 <span data-lock>{{ isset($locks[$student->id]) ? 'Locked by '.$locks[$student->id]->name.' ('.$locks[$student->id]->username.')' : '' }}</span>
             </td>
+            <td>{{ $stageSummaries[$student->id] ?? '' }}</td>
             @foreach($fields as $name => $field)
             <td data-field="{{ $name }}">
                 @if($field[1] === 'nullable_boolean')

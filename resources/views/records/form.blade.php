@@ -3,6 +3,7 @@
 <script src="{{ asset('js/records.js') }}" defer></script>
 <h2>{{ $student->exists ? 'Edit student records fields' : 'Create student' }}</h2>
 <p>User ID: <strong>{{ $student->exists ? $student->id : 'Assigned when created' }}</strong></p>
+@if($student->exists && $student->stageSummary())<p>Current stage (read only): {{ $student->stageSummary() }}</p>@endif
 <p><a href="{{ route('workspace.index') }}">Back to table</a></p>
 @if($student->exists)
 <div id="student-detail" data-lock-status="{{ route('workspace.status', $student) }}"

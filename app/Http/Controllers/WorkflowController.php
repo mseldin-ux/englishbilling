@@ -102,16 +102,19 @@ class WorkflowController extends Controller
         $stages = $run->steps->map(function (WorkflowStep $step) use ($handlers, $run, $user) {
             $handler = $handlers[$step->step] ?? null;
             $current = $run->current_step === $step->step && in_array($run->status, ['active', 'paused'], true);
+            $earlySubmission = $handler instanceof AwaitStep && $step->status === 'upcoming'
+                ? $handler->submission($run) : null;
 
             return (object) [
                 'step' => $step,
+                'earlySubmission' => $earlySubmission,
                 'title' => $handler?->title() ?? $step->step,
                 'kind' => $this->kind($handler),
                 'waitingOn' => $handler ? (Step::WAITING_ON[$handler->waitingOn()] ?? $handler->waitingOn()) : null,
                 'current' => $current,
                 'fields' => $handler instanceof AcceptsInput ? $handler->fields($run) : [],
                 'instructions' => $handler instanceof AcceptsInput ? $handler->instructions() : null,
-                'context' => $current && $handler ? rescue(fn () => $handler->context($run), [], false) : [],
+                'context' => ($current || $earlySubmission !== null) && $handler ? rescue(fn () => $handler->context($run), [], false) : [],
                 'canComplete' => $handler instanceof AcceptsInput && $handler->canComplete($user),
                 'role' => $handler instanceof AcceptsInput ? $handler->role() : null,
                 'isEmail' => $handler instanceof EmailStep,

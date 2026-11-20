@@ -116,7 +116,7 @@ class FormsController extends Controller
     public function learners(Request $request)
     {
         $term = trim($request->validate(['q' => ['required', 'string', 'max:100']])['q']);
-        $query = Student::query()->select(['id', 'first_name', 'middle_name', 'last_name', 'cohort', 'program_id']);
+        $query = Student::query()->with('enrollments.program')->select(['id', 'first_name', 'middle_name', 'last_name', 'cohort', 'program_id', 'current_enrollment_id']);
         $query->where(function ($query) use ($term) {
             if (ctype_digit($term)) {
                 $query->orWhere('id', (int) $term);
@@ -125,7 +125,8 @@ class FormsController extends Controller
         });
         $learners = $query->orderBy('last_name')->orderBy('first_name')->orderBy('id')->limit(25)->get()
             ->map(fn (Student $student) => ['id' => $student->id, 'name' => $student->displayName() ?: 'Unnamed learner',
-                'cohort' => $student->cohort, 'program_id' => $student->program_id]);
+                'cohort' => $student->cohort, 'program_id' => $student->program_id,
+                'enrollments' => \App\Forms\ProgramEnrollment::options($student)]);
 
         return response()->json(['learners' => $learners])->header('Cache-Control', 'private, no-store');
     }
@@ -137,6 +138,7 @@ class FormsController extends Controller
         if ($student) {
             $values['student_id'] = $student->id;
             $values['program_id'] = GraduationInitiation::programs()->contains('id', $student->program_id) ? $student->program_id : null;
+            $values['enrollment_id'] = \App\Forms\ProgramEnrollment::current($student, $values['program_id']);
         }
 
         return $this->form(new FormData(['form_type' => $type, 'status' => 'draft', 'revision' => 1]), $values, null);
@@ -248,6 +250,9 @@ class FormsController extends Controller
         foreach (array_keys(GraduationInitiation::LABELS) as $field) {
             $values[$field] = old($field, $saved[$field] ?? null);
         }
+        if (is_scalar($values['enrollment_id']) && ctype_digit((string) $values['enrollment_id'])) {
+            $values['enrollment_id'] = (int) $values['enrollment_id'];
+        }
         if (session()->hasOldInput()) {
             foreach (array_keys(GraduationInitiation::QUESTIONS) as $question) {
                 $values[$question] = old($question) !== null;
@@ -260,6 +265,7 @@ class FormsController extends Controller
 
         return view('forms.graduation', ['form' => $form, 'values' => $values, 'learner' => $learner,
             'programs' => GraduationInitiation::programs($form->program_id), 'editLock' => $lock,
+            'enrollmentOptions' => \App\Forms\ProgramEnrollment::options($learner),
             'history' => $this->describe($history), 'others' => $others,
             'workflowRuns' => $form->exists ? Workflows::panel('formsdata', $form->id) : collect()]);
     }
@@ -269,6 +275,8 @@ class FormsController extends Controller
         $form->forceFill([
             'student_id' => $data['student_id'],
             'program_id' => $data['program_id'],
+            'enrollment_id' => $data['enrollment_id'],
+            'enrollment_key' => $data['enrollment_key'],
             'status' => $submitted ? 'submitted' : 'draft',
             'data' => GraduationInitiation::document($data, $form->data, $submitted, $user),
         ]);

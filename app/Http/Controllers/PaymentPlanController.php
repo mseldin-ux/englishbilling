@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Billing\BillingRules;
+use App\Billing\EnrollmentAttribution;
 use App\Billing\Ledger;
 use App\Billing\Money;
 use App\Billing\PaymentSchedule;
@@ -60,10 +61,15 @@ class PaymentPlanController extends Controller
     public function show(Student $student)
     {
         [$plan, $payments, $version] = $this->snapshot($student);
-        $summary = Ledger::summary($student->transactions()->get(['transactiontype', 'transactionamount']));
+        $summary = $this->scheduleSummary($student);
+        $enrollment = $student->currentEnrollment;
+        $startDate = $enrollment?->mode === 'staged'
+            ? $enrollment->stages->last()?->started_on
+            : ($enrollment?->started_on ?? $student->start_date);
 
         return view('students.schedule', ['student' => $student, 'plan' => $plan,
             'payments' => $payments, 'version' => $version, 'fees' => $summary['fees'],
+            'appFee' => $summary['app_fee'], 'startDate' => $startDate,
             'templates' => PaymentPlan::orderBy('id')->get()]);
     }
 
@@ -75,7 +81,7 @@ class PaymentPlanController extends Controller
             'exclude_app_fee' => ['sometimes', 'boolean'],
             'app_fee' => ['required', ...BillingRules::money()],
         ]);
-        $summary = Ledger::summary($student->transactions()->get(['transactiontype', 'transactionamount']));
+        $summary = $this->scheduleSummary($student);
         $total = BigDecimal::of($summary['fees']);
         if ($request->boolean('exclude_app_fee')) {
             if (BigDecimal::of($data['app_fee'])->isNegative()) {
@@ -92,6 +98,7 @@ class PaymentPlanController extends Controller
     public function save(Request $request, Student $student)
     {
         $data = $request->validate([
+            ...EnrollmentAttribution::rules(),
             'version' => ['required', 'string'],
             'paymentplandesc' => ['present', 'nullable', 'string', 'max:65535'],
             'payments' => ['present', 'array', 'max:120'],
@@ -110,6 +117,8 @@ class PaymentPlanController extends Controller
                 $plan = new StudentPaymentPlan;
                 $plan->student_id = $locked->id;
             }
+            $attribution = EnrollmentAttribution::data($locked, array_intersect_key($data, ['billing_period' => true]), $plan->exists ? $plan : null);
+            $plan->forceFill($attribution);
             $plan->paymentplandesc = $data['paymentplandesc'];
             $plan->save();
             $retained = [];
@@ -125,6 +134,8 @@ class PaymentPlanController extends Controller
                 $row->setRawAttributes($original);
                 $row->student_id = $locked->id;
                 $row->studentpaymentplanid_id = $plan->id;
+                $row->enrollment_id = $plan->enrollment_id;
+                $row->stage_enrollment_id = $plan->stage_enrollment_id;
                 if (substr($original['paymentduedate'] ?? '', 0, 10) !== $payment['paymentduedate']) {
                     $row->paymentduedate = $payment['paymentduedate'];
                 }
@@ -158,7 +169,13 @@ class PaymentPlanController extends Controller
 
     private function snapshot(Student $student): array
     {
-        $plans = $student->paymentPlans()->get();
+        $query = $student->paymentPlans();
+        if ($student->current_enrollment_id) {
+            foreach (EnrollmentAttribution::current($student) as $field => $value) {
+                $query->where($field, $value);
+            }
+        }
+        $plans = $query->get();
         if ($plans->count() > 1) {
             throw ValidationException::withMessages(['plan' => 'Multiple plans exist for this learner. Review them before editing.']);
         }
@@ -167,5 +184,21 @@ class PaymentPlanController extends Controller
         $version = hash('sha256', serialize([$plan?->getRawOriginal(), $payments->map(fn ($p) => $p->getRawOriginal())->all()]));
 
         return [$plan, $payments, $version];
+    }
+
+    private function scheduleSummary(Student $student): array
+    {
+        $query = $student->transactions();
+        if ($student->current_enrollment_id) {
+            foreach (EnrollmentAttribution::current($student) as $field => $value) {
+                $query->where($field, $value);
+            }
+        }
+
+        $transactions = $query->get(['transactiontype', 'transactionamount', 'recognition']);
+
+        return [...Ledger::summary($transactions), 'app_fee' => $student->current_enrollment_id
+            ? Ledger::summary($transactions->where('recognition', 'application'))['fees']
+            : '100.00'];
     }
 }

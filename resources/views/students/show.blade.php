@@ -36,6 +36,8 @@
     <button>Save All Changes</button>
 </form>
 
+@include('students.enrollments')
+
 @foreach(['loas'=>'Leaves of Absence','transactions'=>'Transactions','invoices'=>'Invoices'] as $kind => $heading)
 <section id="{{ $kind }}" data-load="{{ route('records.index', [$student, $kind]) }}">
     <h2>{{ $heading }}</h2>

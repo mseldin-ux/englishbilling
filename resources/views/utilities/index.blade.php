@@ -2,6 +2,8 @@
 @section('content')
 <div class="form-page">
     <h2>Utilities</h2>
+    <h3>Enrollment settings</h3>
+    <p><a href="{{ route('enrollments.settings') }}">Configure program stage service days</a></p>
     <h3>Test mail connection</h3>
     <p>Configured mailer: <strong>{{ $mailer }}</strong> (transport: {{ $transport }}).</p>
     <p>This sends a plain-text message immediately using the application's current mail configuration.

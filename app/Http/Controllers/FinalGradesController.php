@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Forms\FinalGrades;
 use App\Forms\FormLocks;
+use App\Forms\ProgramEnrollment;
 use App\Models\FinalGrade;
 use App\Models\Student;
 use App\Models\User;
@@ -29,6 +30,9 @@ class FinalGradesController extends Controller
         } elseif ($student && $programs->contains('id', $student->program_id)) {
             $values['program_id'] = $student->program_id;
         }
+        $values['enrollment_id'] = $request->has('enrollment_id')
+            ? ($request->input('enrollment_id') === 'legacy' ? null : $request->input('enrollment_id'))
+            : ProgramEnrollment::current($student, $values['program_id']);
 
         return $this->page(new FinalGrade(['status' => 'draft', 'revision' => 1]), $values, [], null, $programs);
     }
@@ -49,7 +53,8 @@ class FinalGradesController extends Controller
         $data = FinalGrades::validate($request->all(), $submitting);
         try {
             $sheet = DB::transaction(function () use ($request, $data, $submitting) {
-                $this->rejectDuplicate($data['studentid'], $data['program_id']);
+                Student::whereKey($data['studentid'])->lockForUpdate()->firstOrFail();
+                $this->rejectDuplicate($data['studentid'], $data['program_id'], $data['enrollment_key']);
                 $sheet = new FinalGrade(['revision' => 1]);
                 FinalGrades::apply($sheet, $data, $submitting, $request->user());
                 $this->history($sheet, $submitting ? 'submitted' : 'created', $request->user());
@@ -61,8 +66,8 @@ class FinalGradesController extends Controller
             });
         } catch (QueryException $exception) {
             // A concurrent save for the same learner and program loses the unique-key race.
-            if (FinalGrade::where('studentid', $data['studentid'])->where('program_id', $data['program_id'])->exists()) {
-                $this->rejectDuplicate($data['studentid'], $data['program_id']);
+            if (FinalGrade::where('studentid', $data['studentid'])->where('program_id', $data['program_id'])->where('enrollment_key', $data['enrollment_key'])->exists()) {
+                $this->rejectDuplicate($data['studentid'], $data['program_id'], $data['enrollment_key']);
             }
             throw $exception;
         }
@@ -74,7 +79,7 @@ class FinalGradesController extends Controller
     {
         $lock = FormLocks::claim($request, self::KIND, $sheet->id);
         $sheet->refresh();
-        $values = ['studentid' => $sheet->studentid, 'program_id' => $sheet->program_id, 'gradername' => $sheet->gradername,
+        $values = ['studentid' => $sheet->studentid, 'program_id' => $sheet->program_id, 'enrollment_id' => $sheet->enrollment_id, 'gradername' => $sheet->gradername,
             'gradedate' => $sheet->gradedate, 'gradenotes' => $sheet->gradenotes];
 
         return $this->page($sheet, $values, $sheet->items()->pluck('grade', 'gradeditemid')->all(), $lock,
@@ -154,12 +159,16 @@ class FinalGradesController extends Controller
         foreach ($saved as $field => $value) {
             $values[$field] = old($field, $value);
         }
+        if (is_scalar($values['enrollment_id']) && ctype_digit((string) $values['enrollment_id'])) {
+            $values['enrollment_id'] = (int) $values['enrollment_id'];
+        }
         $grades = session()->hasOldInput() ? (array) old('grades', []) : $grades;
         $learner = $values['studentid'] ? Student::find($values['studentid']) : null;
         $history = $sheet->exists ? DB::table('finalgrades_history')->where('finalgradeid', $sheet->id)->orderBy('id')->get() : collect();
 
         return view('forms.grades', ['sheet' => $sheet, 'values' => $values, 'grades' => $grades, 'learner' => $learner,
             'programs' => $programs, 'items' => FinalGrades::items($programs->pluck('id')->all(), $sheet), 'editLock' => $lock,
+            'enrollmentOptions' => ProgramEnrollment::options($learner),
             'history' => $this->describe($history), 'existing' => $learner ? $this->sheetsFor($learner->id, $sheet->id) : [],
             'signer' => $sheet->signer]);
     }
@@ -170,15 +179,16 @@ class FinalGradesController extends Controller
             ->when($except, fn ($query) => $query->whereKeyNot($except))
             ->orderByDesc('updated_at')->orderByDesc('id')->get()
             ->map(fn (FinalGrade $sheet) => ['id' => $sheet->id, 'program_id' => $sheet->program_id,
+                'enrollment_id' => $sheet->enrollment_id, 'enrollment_key' => $sheet->enrollment_key,
                 'program' => $sheet->program?->programdesc, 'status' => $sheet->status,
                 'updated_at' => $sheet->updated_at?->format('Y-m-d H:i'), 'url' => route('forms.grades.edit', $sheet)])->all();
     }
 
-    private function rejectDuplicate(int $student, int $program): void
+    private function rejectDuplicate(int $student, int $program, string $scope): void
     {
-        $existing = FinalGrade::where('studentid', $student)->where('program_id', $program)->value('id');
+        $existing = FinalGrade::where('studentid', $student)->where('program_id', $program)->where('enrollment_key', $scope)->value('id');
         if ($existing !== null) {
-            throw ValidationException::withMessages(['program_id' => "This learner already has a grade sheet for this program (sheet {$existing}). Open it from the notice above instead of starting a new one."]);
+            throw ValidationException::withMessages(['program_id' => "This learner already has a grade sheet for this program enrollment (sheet {$existing}). Open it from the notice above instead of starting a new one."]);
         }
     }
 

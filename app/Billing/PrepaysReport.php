@@ -2,7 +2,6 @@
 
 namespace App\Billing;
 
-use App\Models\Student;
 use Brick\Math\BigDecimal;
 use Brick\Math\BigRational;
 use Brick\Math\RoundingMode;
@@ -28,16 +27,17 @@ final class PrepaysReport
     public static function run(array $filters): array
     {
         return DB::transaction(function () use ($filters) {
-            $students = Student::where('start_date', '>=', $filters['startdate'])
-                ->where('start_date', '<', $filters['lastpossiblestartdate'])
-                ->where(fn ($q) => $q->where('graddate', '>=', $filters['startdate'])->orWhereNull('graddate'))
+            $students = EnrollmentAccounting::reportStudents($filters)
                 ->with('loas')->orderBy('id')->get();
-            $sums = [];
+            $students->filter(fn ($student) => $student->current_enrollment_id)->load('enrollments.stages', 'enrollments.events');
+            $sums = $activity = [];
             foreach (array_chunk($students->modelKeys(), 300) as $ids) {
                 $transactions = DB::table('studenttransactions')->whereIn('student_id', $ids)
                     ->where('transactiondate', '>=', $filters['transstart'])->where('transactiondate', '<', $filters['dateasof'])
-                    ->select('id', 'student_id', 'transactiontype', 'transactionamount')->orderBy('id');
+                    ->select('id', 'student_id', 'transactiontype', 'transactionamount',
+                        'enrollment_id', 'stage_enrollment_id', 'recognition')->orderBy('id');
                 foreach ($transactions->cursor() as $transaction) {
+                    $activity[$transaction->student_id][] = $transaction;
                     foreach (self::TYPES as $category => $types) {
                         if (! in_array(strtolower($transaction->transactiontype ?? ''), $types, true)) {
                             continue;
@@ -58,6 +58,11 @@ final class PrepaysReport
             $totals = array_fill_keys(['Owed', 'Discounts', 'Paid', 'Prepaid', 'Prorata Owed', 'Prepaid_accrual', 'Prorata Owed Accrual'], BigRational::of(0));
             $asOf = CarbonImmutable::parse($filters['dateasof'], 'UTC')->startOfDay();
             foreach ($students as $student) {
+                $actualStudent = $student;
+                $legacy = $student->current_enrollment_id ? $student->enrollments->firstWhere('mode', 'legacy') : null;
+                if ($legacy) {
+                    $student = EnrollmentAccounting::legacyStudent($student, $legacy);
+                }
                 $start = CarbonImmutable::parse($student->getRawOriginal('start_date'), 'UTC');
                 $grad = $student->graddate === null ? $asOf : CarbonImmutable::parse($student->getRawOriginal('graddate'), 'UTC');
                 $length = $grad->getTimestamp() - $start->getTimestamp();
@@ -81,6 +86,22 @@ final class PrepaysReport
                 }
                 $adjusted = $amounts['owed']->minus($amounts['discounts']);
                 $accrual = $adjusted->multipliedBy($ratio)->abs();
+                $managed = $actualStudent->current_enrollment_id && (! $legacy || $legacy->ended_on <= $asOf);
+                if ($managed) {
+                    $accrual = EnrollmentAccounting::earned($actualStudent, $activity[$student->id] ?? [], $filters['dateasof'],
+                        function (array $types) {
+                            $sum = function (array $keys) use ($types) {
+                                $total = BigRational::of(0);
+                                foreach ($keys as $key) {
+                                    $total = $total->plus($types[$key] ?? '0.00');
+                                }
+
+                                return $total;
+                            };
+
+                            return (string) $sum(self::TYPES['owed'])->minus($sum(self::TYPES['discounts']))->toScale(2);
+                        })->abs();
+                }
                 $unearned = $adjusted->abs()->minus($accrual);
                 $completed = false;
                 foreach (['graddate', 'sus_date', 'inactive_date', 'actualdategrad', 'wd_date'] as $field) {
@@ -89,7 +110,7 @@ final class PrepaysReport
                         $completed = true;
                     }
                 }
-                $prorata = $completed ? $amounts['paid']->plus($amounts['writeoffs']) : $accrual;
+                $prorata = ! $managed && $completed ? $amounts['paid']->plus($amounts['writeoffs']) : $accrual;
                 $prepaid = $amounts['paid']->plus($amounts['writeoffs'])->minus($prorata);
                 if ($prepaid->isNegative()) {
                     $prepaid = BigRational::of(0);

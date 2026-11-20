@@ -40,9 +40,14 @@ class AwaitStep extends Step
 
     public function reach(WorkflowRun $run, WorkflowStep $step): Outcome
     {
-        $data = ($this->check)($run);
+        $data = $this->submission($run);
 
         return $data === null ? Outcome::waiting() : Outcome::done($data);
+    }
+
+    public function submission(WorkflowRun $run): ?array
+    {
+        return ($this->check)($run);
     }
 
     public function context(WorkflowRun $run): array

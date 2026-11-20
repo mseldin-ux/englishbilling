@@ -60,6 +60,7 @@
                 @endforeach
             </select>
         </label>
+        @include('forms.program-enrollment', ['enrollmentRecord' => $form])
         @foreach(G::QUESTIONS as $field => $question)
             <div class="yes-question">
                 <span>{{ $loop->iteration }}) {{ $question }}</span>

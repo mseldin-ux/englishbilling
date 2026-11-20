@@ -2,7 +2,6 @@
 
 namespace App\Workflows\Steps;
 
-use App\Models\FinalGrade;
 use App\Models\User;
 use App\Models\WorkflowRun;
 use App\Workflows\EmailStep;
@@ -33,7 +32,7 @@ Please fill out the Final Grades form for this Adult Learner, or forward this em
 
 {final_grades_link}
 
-Certificates are ordered on the 10th of each month. Please complete the Final Grades form by the 10th of the month for the certificate to be ordered.
+Certificates are ordered on the 16th of each month. Please complete the Final Grades form by the 16th of the month for the certificate to be ordered.
 
 Thank you,
 The CGMS Admin Team
@@ -62,12 +61,16 @@ TEXT,
     {
         $graduation = Graduation::for($run);
         $form = $graduation->form;
-        $sheet = FinalGrade::where('studentid', $form->student_id)->where('program_id', $form->program_id)->value('id');
+        $sheet = $graduation->gradeSheets()->value('id');
+        if (! $sheet && str_starts_with($form->enrollment_key, 'refresh:')) {
+            throw new StepFailed('This enrollment history was discarded by a staging refresh. Start a new graduation form for the refreshed enrollment.');
+        }
 
         return [...$graduation->variables(),
             'director_login_name' => $this->director($run)->name,
             'final_grades_link' => $sheet ? Graduation::staffLink('forms.grades.edit', $sheet)
-                : Graduation::staffLink('forms.grades.create', ['student' => $form->student_id, 'program' => $form->program_id]),
+                : Graduation::staffLink('forms.grades.create', ['student' => $form->student_id, 'program' => $form->program_id,
+                    'enrollment_id' => $form->enrollment_id ?? 'legacy']),
             'graduation_form_link' => Graduation::staffLink('forms.edit', $form->id)];
     }
 

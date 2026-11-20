@@ -12,7 +12,12 @@ final class BillingTables
     {
         return [
             'programs' => self::PROGRAM_ADDITIONS,
-            'students' => [...self::STUDENT_ADDITIONS, ...self::STUDENT_HISTORY],
+            'students' => [...self::STUDENT_ADDITIONS, ...self::STUDENT_HISTORY, 'current_enrollment_id', 'enrollment_revision'],
+            'studenttransactions' => ['enrollment_id', 'stage_enrollment_id', 'recognition'],
+            'invoices' => ['enrollment_id', 'stage_enrollment_id', 'emailed_at'],
+            'studentpaymentplans' => ['enrollment_id', 'stage_enrollment_id'],
+            'anticipatedpayment' => ['enrollment_id', 'stage_enrollment_id'],
+            'loas' => ['enrollment_id', 'stage_enrollment_id'],
         ];
     }
 

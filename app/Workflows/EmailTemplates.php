@@ -2,6 +2,7 @@
 
 namespace App\Workflows;
 
+use App\Billing\InvoiceEmail;
 use App\Billing\PdfRenderer;
 use App\Models\EmailTemplate;
 use Illuminate\Support\Str;
@@ -10,13 +11,13 @@ use InvalidArgumentException;
 class EmailTemplates
 {
     /**
-     * Every template used by a registered workflow, keyed by template key.
+     * Billing and registered workflow templates, keyed by template key.
      *
      * @return array<string, TemplateDefinition>
      */
     public static function definitions(): array
     {
-        $definitions = [];
+        $definitions = [InvoiceEmail::KEY => InvoiceEmail::definition()];
         foreach (array_keys(Workflows::all()) as $workflow) {
             foreach (Workflows::steps($workflow) as $step) {
                 foreach ($step->templates() as $definition) {

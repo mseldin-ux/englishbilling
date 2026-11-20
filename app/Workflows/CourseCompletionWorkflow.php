@@ -447,7 +447,12 @@ TEXT,
             return ['Course Completion link' => 'Not created yet'];
         }
 
-        return ['Course Completion link' => $invitation->revoked_at ? 'Withdrawn' : ($invitation->usable()
+        $submission = Graduation::for($run)->completion();
+
+        return [...($submission ? [
+            'Course Completion submission' => ['Open submitted form', route('forms.completion.show', $submission)],
+            'Submitted at' => $submission->submitted_at->setTimezone(config('app.timezone'))->format('Y-m-d H:i'),
+        ] : []), 'Course Completion link' => $invitation->revoked_at ? 'Withdrawn' : ($invitation->usable()
             ? 'Active until '.$invitation->expires_at->setTimezone(config('app.timezone'))->format('Y-m-d') : 'Expired'),
             'Last opened by the learner' => $invitation->last_opened_at?->setTimezone(config('app.timezone'))->format('Y-m-d H:i') ?? 'Never'];
     }
@@ -457,7 +462,8 @@ TEXT,
         $graduation = Graduation::for($run);
         $sheet = FinalGrade::where('studentid', $graduation->student->id)->where('program_id', $graduation->form->program_id)->first();
 
-        return ['Final Grades' => $sheet
+        return [...($sheet?->submitted_at && $sheet->status === 'submitted'
+            ? ['Submitted at' => $sheet->submitted_at->setTimezone(config('app.timezone'))->format('Y-m-d H:i')] : []), 'Final Grades' => $sheet
             ? [($sheet->status === 'submitted' ? 'Submitted' : 'Draft (not yet submitted)').' — open', route('forms.grades.edit', $sheet)]
             : ['Not started — start the form', route('forms.grades.create', ['student' => $graduation->student->id, 'program' => $graduation->form->program_id])]];
     }

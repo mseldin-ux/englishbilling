@@ -23,7 +23,9 @@ final class StudentEdits
                     unset($data[$field]);
                 }
             }
+            $before = $locked->getRawOriginal();
             $locked->forceFill($data)->save();
+            Enrollments::syncStatus($locked, $before);
 
             return $locked->fresh();
         });

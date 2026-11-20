@@ -4,6 +4,7 @@
         return;
     }
     const program = document.getElementById('program-id');
+    const enrollment = document.getElementById('program-enrollment');
     const notice = document.getElementById('existing-sheets');
     const duplicate = document.getElementById('duplicate-sheet');
     const prompt = document.getElementById('choose-program');
@@ -11,7 +12,8 @@
     let sheets = [];
     let request = 0;
 
-    const sameProgram = () => (program ? sheets.find((sheet) => String(sheet.program_id) === program.value) : null);
+    const sameProgram = () => (program ? sheets.find((sheet) => String(sheet.program_id) === program.value
+        && sheet.enrollment_key === (enrollment?.value ? `enrollment:${enrollment.value}` : 'legacy')) : null);
 
     const refreshDuplicate = () => {
         if (!duplicate) {
@@ -24,7 +26,7 @@
             const link = document.createElement('a');
             link.href = match.url;
             link.textContent = `open sheet ${match.id}`;
-            duplicate.append(`This learner already has a ${match.status === 'submitted' ? 'submitted' : 'draft'} grade sheet for this program — `, link, ' instead.');
+            duplicate.append(`This learner already has a ${match.status === 'submitted' ? 'submitted' : 'draft'} grade sheet for this program enrollment — `, link, ' instead.');
         }
         buttons.forEach((button) => { button.disabled = Boolean(match); });
     };
@@ -52,7 +54,7 @@
         }
         const heading = document.createElement('p');
         const strong = document.createElement('strong');
-        strong.textContent = 'This learner already has grade sheets. Open an existing sheet rather than starting over:';
+        strong.textContent = 'This learner already has grade sheets. Reuse a sheet only for the same program enrollment:';
         heading.append(strong);
         const list = document.createElement('ul');
         sheets.forEach((sheet, index) => {
@@ -60,7 +62,7 @@
             item.dataset.program = sheet.program_id;
             const link = document.createElement('a');
             link.href = sheet.url;
-            link.textContent = `Sheet ${sheet.id} — ${sheet.program || 'Unknown program'} — ${sheet.status === 'submitted' ? 'Submitted' : 'Draft'}, updated ${sheet.updated_at}`;
+            link.textContent = `Sheet ${sheet.id} — ${sheet.program || 'Unknown program'} — ${sheet.enrollment_key} — ${sheet.status === 'submitted' ? 'Submitted' : 'Draft'}, updated ${sheet.updated_at}`;
             item.append(link);
             if (index === 0) {
                 item.append(' (most recent)');
@@ -95,6 +97,7 @@
 
     if (program) {
         program.addEventListener('change', showProgram);
+        enrollment?.addEventListener('change', refreshDuplicate);
         document.addEventListener('learner-selected', (event) => load(event.detail.id));
         const learner = document.getElementById('learner-id');
         showProgram();

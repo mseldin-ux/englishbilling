@@ -7,12 +7,29 @@
     const hidden = document.getElementById('learner-id');
     const selected = document.getElementById('learner-selected');
     const program = document.getElementById('program-id');
+    const enrollment = document.getElementById('program-enrollment');
+    let enrollments = enrollment ? JSON.parse(enrollment.dataset.options) : [];
+    const showEnrollments = (preferred) => {
+        if (!enrollment) return;
+        const options = enrollments.filter(option => String(option.program_id) === program.value);
+        enrollment.replaceChildren(new Option('Original / legacy program (no tracked enrollment)', ''));
+        options.forEach(option => enrollment.add(new Option(option.label, option.id)));
+        const selected = preferred !== undefined ? options.find(option => String(option.id) === String(preferred))
+            : options.find(option => option.current);
+        enrollment.value = selected ? String(selected.id) : '';
+        enrollment.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    if (enrollment) {
+        program.addEventListener('change', () => showEnrollments());
+        showEnrollments(enrollment.dataset.selected);
+    }
     let timer = null;
     let request = 0;
 
     const clear = () => results.replaceChildren();
 
     const choose = (learner) => {
+        enrollments = learner.enrollments || [];
         hidden.value = learner.id;
         const strong = document.createElement('strong');
         strong.textContent = learner.name;
@@ -24,6 +41,7 @@
         }
         search.value = '';
         clear();
+        showEnrollments();
         document.dispatchEvent(new CustomEvent('learner-selected', { detail: learner }));
     };
 

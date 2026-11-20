@@ -10,9 +10,21 @@ use RuntimeException;
 
 final class LegacyImporter
 {
+    private const ENROLLMENT_HISTORY = ['enrollment_events', 'student_stage_enrollments', 'student_enrollments'];
+
     public function __construct(private Connection $source, private Connection $target) {}
 
     public function run(bool $verifyOnly = false, ?Closure $progress = null): array
+    {
+        return $this->execute($verifyOnly, $progress);
+    }
+
+    public function refresh(bool $apply = false, ?Closure $progress = null): array
+    {
+        return $this->execute(false, $progress, true, ! $apply);
+    }
+
+    private function execute(bool $verifyOnly, ?Closure $progress, bool $refresh = false, bool $preview = false): array
     {
         $this->assertSeparateDatabases();
         $columns = [];
@@ -33,9 +45,49 @@ final class LegacyImporter
             $this->source->statement('SET TRANSACTION READ ONLY');
         }
 
-        return $this->source->transaction(function () use ($verifyOnly, $progress, $columns) {
-            return $this->target->transaction(function () use ($verifyOnly, $progress, $columns) {
-                if (! $verifyOnly) {
+        return $this->source->transaction(function () use ($verifyOnly, $progress, $columns, $refresh, $preview) {
+            return $this->target->transaction(function () use ($verifyOnly, $progress, $columns, $refresh, $preview) {
+                $plan = $refresh ? $this->refreshPlan() : null;
+                $enrollmentReset = [];
+                if ($refresh) {
+                    foreach (self::ENROLLMENT_HISTORY as $table) {
+                        $enrollmentReset[$table] = $this->target->table($table)->count();
+                    }
+                }
+                if ($preview) {
+                    return ['mode' => 'refresh_preview', 'tables' => $plan,
+                        'enrollment_reset' => $enrollmentReset,
+                        'source_database' => $this->source->getDatabaseName(),
+                        'target_database' => $this->target->getDatabaseName()];
+                }
+                if ($refresh) {
+                    if ($this->target->table('student_edit_locks')->exists()) {
+                        throw new RuntimeException('Student editing locks exist; end editing sessions before refreshing.');
+                    }
+                    $this->resetEnrollments();
+                    $this->target->table('invoices')->whereNotNull('emailed_at')->update(['emailed_at' => null]);
+                    $progress?->__invoke('Reset test enrollment history and billing attribution.');
+                    foreach ($columns as $table => $fields) {
+                        $this->rows($this->source, $table, $fields, function (array $rows) use ($table, $fields) {
+                            if ($table === 'programs') {
+                                $existing = $this->target->table($table)->whereIn('id', array_column($rows, 'id'))->pluck('id')->all();
+                                $rows = array_values(array_filter($rows, fn (array $row) => ! in_array($row['id'], $existing)));
+                                if ($rows !== []) {
+                                    $this->target->table($table)->insert($rows);
+                                }
+                            } else {
+                                $this->target->table($table)->upsert($rows, ['id'], array_values(array_diff($fields, ['id'])));
+                            }
+                        });
+                        $progress?->__invoke("Refreshed {$table}");
+                    }
+                    foreach (array_reverse(array_keys($columns)) as $table) {
+                        foreach (array_chunk($plan[$table]['removed_ids'], 250) as $ids) {
+                            $this->target->table($table)->whereIn('id', $ids)->delete();
+                        }
+                    }
+                    $this->rebuildBalances();
+                } elseif (! $verifyOnly) {
                     foreach (array_keys(BillingTables::MONEY) as $table) {
                         if ($this->target->table($table)->exists()) {
                             throw new RuntimeException("Destination {$table} is populated; import refused. Use --verify-only or a new database.");
@@ -52,11 +104,18 @@ final class LegacyImporter
 
                 $report = ['verified_at' => now()->toIso8601String(), 'tables' => [],
                     'balance_changes' => [], 'pdfs' => ['count' => 0, 'bytes' => 0]];
+                if ($refresh) {
+                    $report['mode'] = 'refresh_applied';
+                    $report['refresh_plan'] = $plan;
+                    $report['enrollment_reset'] = $enrollmentReset;
+                    $report['source_database'] = $this->source->getDatabaseName();
+                    $report['target_database'] = $this->target->getDatabaseName();
+                }
                 $report['destination_only_student_fields'] = BillingTables::destinationOnly()['students'];
                 $report['destination_only_program_fields'] = BillingTables::PROGRAM_ADDITIONS;
                 foreach ($columns as $table => $fields) {
                     $report['tables'][$table] = $table === 'programs'
-                        ? $this->verifyPrograms($fields) : $this->verifyTable($table, $fields);
+                        ? $this->verifyPrograms($fields, $refresh) : $this->verifyTable($table, $fields);
                     $progress?->__invoke("Verified {$table}");
                 }
                 $programs = $report['tables']['programs'];
@@ -71,6 +130,69 @@ final class LegacyImporter
                 return $report;
             });
         });
+    }
+
+    private function refreshPlan(): array
+    {
+        if (! $this->source->table('students')->exists()) {
+            throw new RuntimeException('Source students table is empty; refresh refused.');
+        }
+        $plan = [];
+        foreach (array_keys(BillingTables::MONEY) as $table) {
+            $source = $this->source->table($table)->orderBy('id')->pluck('id')->all();
+            $target = $this->target->table($table)->orderBy('id')->pluck('id')->all();
+            $localOnly = array_values(array_diff($target, $source));
+            $plan[$table] = [
+                'source_rows' => count($source), 'target_rows' => count($target),
+                'inserted_rows' => count(array_diff($source, $target)),
+                'overwritten_rows' => $table === 'programs' ? 0 : count(array_intersect($source, $target)),
+                'removed_ids' => $table === 'programs' ? [] : $localOnly,
+                'preserved_local_ids' => $table === 'programs' ? $localOnly : [],
+            ];
+        }
+        // Enrollment history is explicitly discarded; other Laravel-only records must survive intact.
+        foreach ($this->target->getSchemaBuilder()->getTableListing(schemaQualified: false) as $table) {
+            if (array_key_exists($table, $plan) || in_array($table, self::ENROLLMENT_HISTORY, true)) {
+                continue;
+            }
+            foreach ($this->target->getSchemaBuilder()->getForeignKeys($table) as $foreign) {
+                $parent = $foreign['foreign_table'];
+                if (! isset($plan[$parent]) || $foreign['foreign_columns'] !== ['id']) {
+                    continue;
+                }
+                foreach (array_chunk($plan[$parent]['removed_ids'], 250) as $ids) {
+                    if ($this->target->table($table)->whereIn($foreign['columns'][0], $ids)->exists()) {
+                        throw new RuntimeException("Refresh refused: {$table} references local-only {$parent} records. Resolve these records before refreshing.");
+                    }
+                }
+            }
+        }
+
+        return $plan;
+    }
+
+    private function resetEnrollments(): void
+    {
+        $this->target->table('students')->whereNotNull('current_enrollment_id')->orWhere('enrollment_revision', '!=', 0)
+            ->update(['current_enrollment_id' => null, 'enrollment_revision' => 0]);
+        foreach (['studenttransactions', 'invoices', 'studentpaymentplans', 'anticipatedpayment', 'loas'] as $table) {
+            $values = ['enrollment_id' => null, 'stage_enrollment_id' => null];
+            $query = $this->target->table($table)->whereNotNull('enrollment_id')->orWhereNotNull('stage_enrollment_id');
+            if ($table === 'studenttransactions') {
+                $values['recognition'] = null;
+                $query->orWhereNotNull('recognition');
+            }
+            $query->update($values);
+        }
+        foreach (['formsdata', 'finalgrades'] as $table) {
+            $this->target->table($table)->whereNotNull('enrollment_id')->orderBy('id')->eachById(function ($row) use ($table) {
+                $this->target->table($table)->where('id', $row->id)
+                    ->update(['enrollment_id' => null, 'enrollment_key' => 'refresh:'.$row->enrollment_id]);
+            });
+        }
+        foreach (self::ENROLLMENT_HISTORY as $table) {
+            $this->target->table($table)->delete();
+        }
     }
 
     private function assertSeparateDatabases(): void
@@ -201,7 +323,7 @@ final class LegacyImporter
      * may be edited and programs added. Every legacy id must remain, with unchanged servicedays,
      * because students reference those ids and income reports depend on servicedays.
      */
-    private function verifyPrograms(array $fields): array
+    private function verifyPrograms(array $fields, bool $allowServiceDaysChanges = false): array
     {
         $source = $this->source->table('programs')->orderBy('id')->get($fields)->keyBy('id');
         $target = $this->target->table('programs')->orderBy('id')->get($fields)->keyBy('id');
@@ -211,11 +333,11 @@ final class LegacyImporter
             if ($current === null) {
                 throw new RuntimeException("Verification failed for programs: legacy program {$id} is missing.");
             }
-            if ((string) $legacy->servicedays !== (string) $current->servicedays) {
+            if (! $allowServiceDaysChanges && (string) $legacy->servicedays !== (string) $current->servicedays) {
                 throw new RuntimeException("Verification failed for programs: servicedays changed for legacy program {$id}.");
             }
             $changes = [];
-            foreach (array_diff($fields, ['id', 'servicedays']) as $field) {
+            foreach (array_diff($fields, $allowServiceDaysChanges ? ['id'] : ['id', 'servicedays']) as $field) {
                 if ($legacy->{$field} !== $current->{$field}) {
                     $changes[$field] = ['legacy' => $legacy->{$field}, 'current' => $current->{$field}];
                 }

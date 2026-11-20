@@ -2,6 +2,7 @@
 
 namespace App\Billing;
 
+use App\Models\StudentEnrollment;
 use Brick\Math\BigDecimal;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -15,22 +16,47 @@ final class InvoicesReport
     {
         return DB::transaction(function () use ($filters) {
             $query = DB::table('invoices as i')->leftJoin('students as s', 's.id', '=', 'i.student_id')
+                ->leftJoin('student_enrollments as e', 'e.id', '=', 'i.enrollment_id')
                 ->select('i.id', 'i.student_id', 'i.datesent', 'i.amount', 's.first_name', 's.middle_name', 's.last_name')
                 ->orderBy('i.student_id')->orderBy('i.datesent')->orderBy('i.id');
             foreach (['studentenrolleddate' => ['s.start_date', '>='], 'invoicesentafterdate' => ['i.datesent', '>='],
                 'invoicesentbeforedate' => ['i.datesent', '<=']] as $filter => [$column, $operator]) {
                 if (isset($filters[$filter])) {
-                    $query->where($column, $operator, $filters[$filter].' 00:00:00');
+                    if ($filter === 'studentenrolleddate') {
+                        $query->whereRaw('CASE WHEN i.enrollment_id IS NULL THEN s.start_date ELSE e.started_on END >= ?', [$filters[$filter]]);
+                    } else {
+                        $query->where($column, $operator, $filters[$filter].' 00:00:00');
+                    }
                 }
             }
             foreach (['hidegraduated' => 's.graduated', 'hideinactive' => 's.inactive'] as $filter => $column) {
                 if (! empty($filters[$filter])) {
-                    $query->where(fn ($q) => $q->whereNull($column)->orWhere($column, false));
+                    $query->where(fn ($q) => $q->whereNotNull('i.enrollment_id')
+                        ->orWhere(fn ($legacy) => $legacy->whereNull($column)->orWhere($column, false)));
                 }
             }
+            $enrollments = null;
+            $query->addSelect('i.enrollment_id');
+            $asOf = $filters['invoicesentbeforedate'] ?? today()->toDateString();
             $groups = [];
             $totals = ['Total invoiced' => '0.00', 'Total received' => '0.00', 'Total prepayments' => '0.00', 'Total outstanding' => '0.00'];
             foreach ($query->cursor() as $invoice) {
+                if ($invoice->enrollment_id !== null && (! empty($filters['hidegraduated']) || ! empty($filters['hideinactive']))) {
+                    $enrollments ??= StudentEnrollment::with('events', 'stages')->whereIn('id',
+                        (clone $query)->reorder()->select('i.enrollment_id')->whereNotNull('i.enrollment_id')->distinct()->pluck('i.enrollment_id'))->get()->keyBy('id');
+                    $enrollment = $enrollments->get($invoice->enrollment_id);
+                    if (! $enrollment) {
+                        Enrollments::error("Invoice {$invoice->id} references a missing enrollment.");
+                    }
+                    $status = $enrollment->mode === 'legacy' ? null : EnrollmentAccounting::statusAt($enrollment, $asOf);
+                    foreach (['hidegraduated' => 'graduated', 'hideinactive' => 'inactive'] as $filter => $flag) {
+                        $hidden = $enrollment->mode === 'legacy'
+                            ? (bool) ($enrollment->legacy_context['student'][$flag] ?? false) : $status === $flag;
+                        if (! empty($filters[$filter]) && $hidden) {
+                            continue 2;
+                        }
+                    }
+                }
                 if ($invoice->amount === null) {
                     throw ValidationException::withMessages(['report' => "Invoice {$invoice->id} has a missing amount. Correct it before generating this report."]);
                 }

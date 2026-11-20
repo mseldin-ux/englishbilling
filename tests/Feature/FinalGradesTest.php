@@ -2,11 +2,15 @@
 
 namespace Tests\Feature;
 
+use App\Billing\Enrollments;
+use App\Models\FormData;
 use App\Models\FinalGrade;
 use App\Models\GradedItem;
 use App\Models\Program;
 use App\Models\Student;
 use App\Models\User;
+use App\Models\WorkflowRun;
+use App\Workflows\Steps\Graduation;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -85,6 +89,36 @@ class FinalGradesTest extends TestCase
             ->assertRedirect();
 
         return FinalGrade::latest('id')->firstOrFail();
+    }
+
+    public function test_returning_enrollment_requires_new_grades_and_never_uses_the_previous_sheet(): void
+    {
+        $this->actingAs(User::factory()->create(['is_admin' => true]));
+        $this->post('/forms/final-grades', [...$this->complete(), 'action' => 'submit'])->assertSessionHasNoErrors();
+        $original = FinalGrade::firstOrFail();
+        $enrollment = DB::transaction(fn () => Enrollments::start($this->student->fresh(),
+            ['program_id' => $this->full->id, 'mode' => 'whole', 'started_on' => '2026-01-01']));
+        $form = FormData::create(['form_type' => 'graduation-initiation', 'student_id' => $this->student->id,
+            'program_id' => $this->full->id, 'enrollment_id' => $enrollment->id, 'enrollment_key' => 'enrollment:'.$enrollment->id, 'data' => []]);
+        $run = new WorkflowRun(['subject_id' => $form->id]);
+        $this->assertNull(Graduation::for($run)->gradeSheet());
+        $this->post('/forms/final-grades', [...$this->complete(), 'enrollment_id' => $enrollment->id, 'action' => 'submit'])
+            ->assertSessionHasNoErrors();
+        $new = FinalGrade::latest('id')->firstOrFail();
+        $this->assertNotSame($original->id, $new->id);
+        $this->assertSame($new->id, Graduation::for($run)->gradeSheet()->id);
+        $this->post('/forms/final-grades', [...$this->complete(), 'enrollment_id' => '000'.$enrollment->id])
+            ->assertSessionHasErrors('program_id');
+        $this->assertDatabaseCount('finalgrades', 2);
+        $this->assertNull($original->fresh()->enrollment_id);
+        $this->assertSame('legacy', $original->fresh()->enrollment_key);
+        $this->assertSame('A', $original->items()->where('gradeditemid', $this->items[1]->id)->value('grade'));
+        $this->get('/forms/final-grades/create?student='.$this->student->id)->assertOk()
+            ->assertSee('Program enrollment')->assertViewHas('values', fn ($values) => $values['enrollment_id'] === $enrollment->id);
+        $other = new Student;
+        $other->forceFill(['first_name' => 'Other'])->save();
+        $this->post('/forms/final-grades', [...$this->complete(['studentid' => $other->id]), 'enrollment_id' => $enrollment->id])
+            ->assertSessionHasErrors('enrollment_id');
     }
 
     public function test_every_level_can_open_the_form_and_items_follow_item_order(): void

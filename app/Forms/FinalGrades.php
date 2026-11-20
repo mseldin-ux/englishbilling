@@ -50,7 +50,7 @@ final class FinalGrades
     }
 
     /**
-     * @return array{studentid: int, program_id: int, gradername: ?string, gradedate: ?string, gradenotes: ?string, grades: array<int, ?string>}
+     * @return array{studentid: int, program_id: int, enrollment_id: ?int, enrollment_key: string, gradername: ?string, gradedate: ?string, gradenotes: ?string, grades: array<int, ?string>}
      */
     public static function validate(array $input, bool $submitting, ?FinalGrade $sheet = null): array
     {
@@ -96,7 +96,8 @@ final class FinalGrades
         });
         $data = $validator->validate();
 
-        return [...$data, 'studentid' => (int) $data['studentid'], 'program_id' => (int) $data['program_id'], 'grades' => $values];
+        return [...$data, ...ProgramEnrollment::scope($input, (int) $data['studentid'], (int) $data['program_id'], $sheet),
+            'studentid' => (int) $data['studentid'], 'program_id' => (int) $data['program_id'], 'grades' => $values];
     }
 
     /**
@@ -130,6 +131,8 @@ final class FinalGrades
             'student_name' => $student?->displayName(),
             'student_cohort' => $student?->cohort,
             'program_id' => $sheet->program_id,
+            'enrollment_id' => $sheet->enrollment_id,
+            'enrollment_key' => $sheet->enrollment_key,
             'program_name' => Program::find($sheet->program_id)?->programdesc,
             'gradername' => $sheet->gradername,
             'gradedate' => $sheet->gradedate,
@@ -160,6 +163,8 @@ final class FinalGrades
         $sheet->forceFill([
             'studentid' => $data['studentid'],
             'program_id' => $data['program_id'],
+            'enrollment_id' => $data['enrollment_id'],
+            'enrollment_key' => $data['enrollment_key'],
             'gradername' => $data['gradername'],
             'gradedate' => $data['gradedate'],
             'gradenotes' => $data['gradenotes'],

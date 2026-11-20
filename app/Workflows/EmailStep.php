@@ -77,7 +77,7 @@ abstract class EmailStep extends Step
 
     protected function send(WorkflowRun $run, array $data = []): Outcome
     {
-        $recipients = $this->recipients($run);
+        $recipients = Settings::staffRecipients($this->workflow, $this->key) ?? $this->recipients($run);
         if ($recipients === []) {
             throw new StepFailed($this->noRecipients());
         }

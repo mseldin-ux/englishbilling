@@ -5,6 +5,7 @@ namespace App\Workflows;
 use App\Models\User;
 use App\Models\WorkflowRun;
 use App\Models\WorkflowStep;
+use App\Workflows\Steps\Graduation;
 use Closure;
 
 /**
@@ -43,6 +44,33 @@ class ManualStep extends Step implements AcceptsInput
         return $this->fields;
     }
 
+    public function isApproval(): bool
+    {
+        return in_array('yesno', array_column($this->fields, 'type'), true);
+    }
+
+    public function polls(): bool
+    {
+        return $this->isApproval();
+    }
+
+    public function templates(): array
+    {
+        if (! $this->isApproval()) {
+            return [];
+        }
+
+        return [new TemplateDefinition(
+            key: "{$this->workflow}-{$this->key}-approval",
+            name: $this->title().' approval reminder',
+            description: 'Sent once when this approval becomes active, to its configured recipients or team default.',
+            placeholders: [...Graduation::PLACEHOLDERS, 'stage_title' => 'Approval stage', 'approval_link' => 'Link to the approval form (staff login required)'],
+            required: ['approval_link'],
+            subject: 'Approval needed: {learner_name} — {stage_title}',
+            body: "Hello,\n\n{learner_name} ({program}) is ready for {stage_title}.\n\nPlease review and complete the approval:\n{approval_link}\n\nThe CGMS Admin Team",
+        )];
+    }
+
     public function role(): string
     {
         return $this->role;
@@ -64,7 +92,8 @@ class ManualStep extends Step implements AcceptsInput
         ]);
 
         return "Completed by {$who} on the learner's workflow page: open the learner from this list, answer the questions below, and click Complete. "
-            .implode(' ', $rules);
+            .implode(' ', $rules).($this->isApproval()
+                ? ' A reminder with a link to this approval is emailed once when it becomes active, using its configured recipients or team default on Workflow Settings.' : '');
     }
 
     public function instructions(): ?string
@@ -95,7 +124,25 @@ class ManualStep extends Step implements AcceptsInput
 
     public function reach(WorkflowRun $run, WorkflowStep $step): Outcome
     {
-        return isset($step->data['submitted_at']) ? Outcome::done() : Outcome::waiting();
+        if (isset($step->data['submitted_at'])) {
+            return Outcome::done();
+        }
+        if (! $this->isApproval() || isset($step->data['approval_notification'])) {
+            return Outcome::waiting();
+        }
+        $override = Settings::stage($this->workflow, $this->key)['recipients'] ?? '';
+        $recipients = $override !== '' ? EmailStep::addresses($override)
+            : Settings::emails($this->role === 'finance' ? 'finance_email' : 'records_email');
+        $notification = new NotifyEmail(
+            $this->templates()[0],
+            fn () => $recipients,
+            fn () => [...Graduation::for($run)->variables(), 'stage_title' => $this->title(),
+                'approval_link' => Graduation::staffLink('workflows.runs.show', $run->id).'#current-stage'],
+            missing: 'No approval recipients are configured. An admin must set the approval recipients or team default on Workflow Settings.',
+        );
+        $outcome = $notification->reach($run, $step);
+
+        return Outcome::waiting(data: ['approval_notification' => [...$outcome->email, 'sent_at' => now()->toIso8601String()]]);
     }
 
     public function context(WorkflowRun $run): array

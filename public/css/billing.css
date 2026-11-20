@@ -78,7 +78,7 @@ main { padding-top: .5rem; }
 #student-detail section { margin-top: .7rem; }
 .invoice-dialog { max-height: 85vh; overflow-y: auto; }
 .invoice-dialog h2 { margin: .2rem 0; }
-.invoice-editor-fields { display: grid; grid-template-columns: 1fr 1fr; gap: .25rem 1rem; }
+.invoice-editor-fields { display: grid; grid-template-columns: 1fr 1fr; gap: .25rem 1rem; border: 0; padding: 0; margin: 0; min-width: 0; }
 .invoice-editor-fields label { margin: .3rem 0; }
 .invoice-editor-fields input:not([type=checkbox]) { width: 100%; }
 .invoice-editor-fields textarea { resize: vertical; }

@@ -41,7 +41,7 @@ Before your certificate is ordered, please also complete the short Course Comple
 
 {survey_link}
 
-Certificates are ordered on the 10th of each month.
+Certificates are ordered on the 16th of each month.
 
 Warm regards,
 The CGMS Admin Team

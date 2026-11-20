@@ -11,7 +11,16 @@
     };
 @endphp
 @if($kind === 'transactions')
-    <p class="ledger-summary" data-fees="{{ $summary['fees'] }}">BALANCE: {{ $student->balance ?? '0.00' }} | TOTAL FEES: {{ $summary['fees'] }} | PAID: {{ $summary['paid'] }}</p>
+    @php
+        $currentTransactions = $records;
+        if ($student->current_enrollment_id) {
+            foreach (\App\Billing\EnrollmentAttribution::current($student) as $field => $value) {
+                $currentTransactions = $currentTransactions->where($field, $value);
+            }
+        }
+        $currentFees = \App\Billing\Ledger::summary($currentTransactions)['fees'];
+    @endphp
+    <p class="ledger-summary" data-fees="{{ $summary['fees'] }}" data-current-fees="{{ $currentFees }}">BALANCE: {{ $student->balance ?? '0.00' }} | TOTAL FEES: {{ $summary['fees'] }} | PAID: {{ $summary['paid'] }}</p>
     <datalist id="transaction-types">@foreach($types as $t)<option value="{{ $t }}"></option>@endforeach</datalist>
     <p class="hint">Customer Date appears on statements. Our Date is the internal processed/deposit date. Amounts are signed: payments normally reduce the balance.</p>
 @endif
@@ -19,6 +28,7 @@
 <table class="record-table">
     <thead><tr><th>ID</th>
         @foreach($fields as [$label, $type])<th>{{ $label }}</th>@endforeach
+        @if($student->current_enrollment_id)<th>Program / Stage</th>@if($kind === 'transactions')<th>Attribution</th>@endif @endif
         <th>Action</th>
     </tr></thead>
     <tbody>
@@ -34,6 +44,12 @@
             @include('students.record-input', ['formId'=>$newForm,'value'=>'','creating'=>true])
         </td>
         @endforeach
+        @if($student->current_enrollment_id)
+            <td>@include('students.billing-period', ['periodForm' => $newForm, 'periodRecord' => null])</td>
+            @if($kind === 'transactions')
+            <td><select form="{{ $newForm }}" name="recognition"><option value="service">Service</option><option value="application">Application fee (immediate)</option></select></td>
+            @endif
+        @endif
         <td><button form="{{ $newForm }}">SAVE</button></td>
     </tr>
     @forelse($records as $record)
@@ -51,6 +67,12 @@
                 @php $value = $type === 'date' ? substr($record->getRawOriginal($name) ?? '',0,10) : $record->$name; @endphp
                 <td>@include('students.record-input', ['creating'=>false])</td>
             @endforeach
+            @if($student->current_enrollment_id)
+                <td>@include('students.billing-period', ['periodForm' => $formId, 'periodRecord' => $record])</td>
+                @if($kind === 'transactions')
+                <td><select form="{{ $formId }}" name="recognition"><option value="service">Service</option><option value="application" @selected($record->recognition === 'application')>Application fee (immediate)</option></select></td>
+                @endif
+            @endif
             <td class="record-actions">
                 <button form="{{ $formId }}">SAVE</button>
                 <form method="post" action="{{ route('records.destroy', [$student, $kind, $record->id]) }}" data-ajax data-refresh="{{ $kind }}" data-confirm="Really delete this record?">

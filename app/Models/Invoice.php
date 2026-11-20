@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class Invoice extends BillingModel
 {
     public const METADATA_COLUMNS = ['id', 'student_id', 'datesent', 'nextdate', 'amount', 'notes',
-        'invoicereference', 'batchid', 'user_sent', 'urgent_message'];
+        'invoicereference', 'batchid', 'user_sent', 'urgent_message', 'enrollment_id', 'stage_enrollment_id', 'emailed_at'];
 
     protected $table = 'invoices';
 
@@ -16,7 +16,8 @@ class Invoice extends BillingModel
 
     protected function casts(): array
     {
-        return ['amount' => 'decimal:2', 'datesent' => 'immutable_datetime', 'nextdate' => 'immutable_datetime'];
+        return ['amount' => 'decimal:2', 'datesent' => 'immutable_datetime', 'nextdate' => 'immutable_datetime',
+            'emailed_at' => 'immutable_datetime'];
     }
 
     public function student(): BelongsTo

@@ -30,6 +30,8 @@ class RecordsController extends Controller
         $locks = $this->locksFor($students->modelKeys())->keyBy('student_id');
 
         return view('records.index', ['students' => $students, 'locks' => $locks,
+            'stageSummaries' => Student::whereIn('id', $students->modelKeys())->with('currentEnrollment.stages')
+                ->get()->mapWithKeys(fn ($student) => [$student->id => $student->stageSummary()]),
             'fields' => RecordsFields::fields(), 'accessStatuses' => $this->statuses(),
             'filters' => RecordsSearch::filters($request), 'searchFields' => RecordsSearch::fields()]);
     }

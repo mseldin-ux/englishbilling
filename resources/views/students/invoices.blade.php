@@ -1,12 +1,12 @@
 <p class="hint">HTML and Current PDF show the current invoice and ledger. Stored PDF preserves the document saved when the invoice was created.</p>
 <div class="table-scroll">
 <table class="record-table">
-    <thead><tr><th>ID</th><th>Creator</th><th>Sent</th><th>Due</th><th>Amount</th><th>Notes</th><th>Reference</th><th>Urgent Msg</th><th>Actions</th></tr></thead>
+    <thead><tr><th>ID</th><th>Creator</th><th>Sent</th><th>Last emailed</th><th>Due</th><th>Amount</th><th>Notes</th><th>Reference</th><th>Urgent Msg</th><th>Actions</th></tr></thead>
     <tbody>
     @forelse($records as $invoice)
         <tr>
             <td>{{ $invoice->id }}</td><td>{{ $invoice->user_sent }}</td>
-            <td>{{ $invoice->datesent?->format('Y-m-d') }}</td><td>{{ $invoice->nextdate?->format('Y-m-d') }}</td>
+            <td>{{ $invoice->datesent?->format('Y-m-d') }}</td><td>{{ $invoice->emailed_at?->format('Y-m-d H:i') ?? 'Not emailed' }}</td><td>{{ $invoice->nextdate?->format('Y-m-d') }}</td>
             <td>{{ $invoice->amount }}</td><td class="invoice-notes">{{ $invoice->notes }}</td>
             <td>{{ $invoice->invoicereference }}</td><td>{{ $invoice->urgent_message }}</td>
             <td class="record-actions">
@@ -23,7 +23,7 @@
             </td>
         </tr>
     @empty
-        <tr><td colspan="9">No existing records.</td></tr>
+        <tr><td colspan="10">No existing records.</td></tr>
     @endforelse
     </tbody>
 </table>

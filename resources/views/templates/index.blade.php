@@ -1,7 +1,7 @@
 @extends('layouts.app')
 @section('content')
 <h2>Email Templates</h2>
-<p class="hint">These emails (and PDF letters attached to them) are sent automatically by workflows. Editing a template affects emails sent from now on;
+<p class="hint">These templates are used for invoice emails and workflow emails (and attached PDF letters). Editing a template affects future email drafts and sends;
     emails already sent are not changed.</p>
 <table class="forms-table">
     <thead><tr><th>Template</th><th>When it is sent</th><th>Subject</th><th>Last edited</th><th></th></tr></thead>

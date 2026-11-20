@@ -37,9 +37,11 @@ final class AttributableIncome
                 ->where('t.transactiondate', '<', $filters['enddate'])
                 ->whereNotNull('t.transactionamount')
                 ->select('t.id', 't.student_id', 't.transactiontype', 't.transactionamount', 's.first_name', 's.last_name')
+                ->addSelect('t.enrollment_id', 't.stage_enrollment_id', 't.recognition')
                 ->orderBy('t.id');
             if (! empty($filters['enrolldate'])) {
-                $query->where('s.start_date', '>=', $filters['enrolldate']);
+                $query->leftJoin('student_enrollments as e', 'e.id', '=', 't.enrollment_id')
+                    ->whereRaw('CASE WHEN t.enrollment_id IS NULL THEN s.start_date ELSE e.started_on END >= ?', [$filters['enrolldate']]);
             }
             $types = $rows = [];
             foreach ($query->cursor() as $transaction) {
@@ -49,6 +51,7 @@ final class AttributableIncome
                 $types[$type] = Money::add($types[$type] ?? '0.00', $amount);
                 $rows[$id] ??= ['id' => $id, 'name' => ($transaction->first_name ?? 'None').' '.($transaction->last_name ?? 'None'), 'types' => []];
                 $rows[$id]['types'][$type] = Money::add($rows[$id]['types'][$type] ?? '0.00', $amount);
+                $rows[$id]['transactions'][] = $transaction;
             }
             // Keep the owner's legacy sample layout independent of the database scan order.
             $types = array_replace(array_intersect_key(array_fill_keys(self::TYPE_ORDER, '0.00'), $types), $types);
@@ -56,12 +59,14 @@ final class AttributableIncome
             $totalEarned = BigRational::of(0);
             foreach (array_chunk(array_keys($rows), 300) as $ids) {
                 $students = Student::whereIn('id', $ids)->with(['program', 'loas'])->orderBy('id')->get();
+                $students->filter(fn ($student) => $student->current_enrollment_id)->load('enrollments.stages', 'enrollments.events');
                 foreach ($students as $student) {
                     $id = (string) $student->id;
                     $raw = $rows[$id];
                     $calc = self::totals($raw['types']);
-                    $progress = ProgramProgress::calculate($student, $filters['enddate']);
-                    $earned = BigRational::of($calc['adjustedowed'])->multipliedBy($progress['ratio']);
+                    $progress = EnrollmentAccounting::displayProgress($student, $filters['enddate']);
+                    $earned = EnrollmentAccounting::earned($student, $raw['transactions'], $filters['enddate'],
+                        fn (array $types) => self::totals($types)['adjustedowed']);
                     $totalEarned = $totalEarned->plus($earned);
                     $rows[$id] = ['id' => $id, 'name' => $raw['name'],
                         ...array_replace(array_fill_keys(array_keys($types), '0.00'), $raw['types']),

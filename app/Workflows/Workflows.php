@@ -12,8 +12,10 @@ use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 use Throwable;
@@ -231,6 +233,9 @@ class Workflows
                 break;
             case 'waiting':
                 $step->forceFill(['status' => 'waiting', 'available_at' => null, 'error' => $outcome->note, 'data' => $data ?: null])->save();
+                if (isset($outcome->data['approval_notification'])) {
+                    self::event($run, $step->step, 'sent', $user, 'Approval reminder sent.', $outcome->data['approval_notification']);
+                }
                 if ($previous !== 'waiting') {
                     self::event($run, $step->step, 'reached', $user, $outcome->note);
                 }
@@ -339,21 +344,28 @@ class Workflows
                 return 'paused';
             });
         }
-        foreach ($fields as $name => $field) {
-            if ($field['type'] === 'file' && $answers[$name] instanceof UploadedFile) {
-                $answers[$name] = self::storeFile($run, $step, $name, $answers[$name], $user);
+        return DB::transaction(function () use ($fields, $answers, $run, $step, $user, $note) {
+            $lockedRun = WorkflowRun::whereKey($run->id)->lockForUpdate()->firstOrFail();
+            if ($lockedRun->status !== 'active' || $lockedRun->current_step !== $step->step) {
+                throw ValidationException::withMessages(['stage' => 'This stage is no longer open. Reload the page.']);
             }
-        }
-        $claimed = WorkflowStep::whereKey($step->id)->where('status', 'waiting')->update(['status' => 'pending', 'completed_by' => $user->id,
-            'data' => json_encode([...($step->data ?? []), 'answers' => $answers, 'note' => $note,
-                'submitted_at' => now()->toIso8601String(), 'submitted_by' => $user->id]), 'updated_at' => now()]);
-        if ($claimed === 0) {
-            throw ValidationException::withMessages(['stage' => 'Someone else completed this stage first. Reload the page.']);
-        }
-        self::event($run, $step->step, 'completed', $user, $note, ['answers' => self::displayAnswers($answers)]);
-        self::advance($run->id, $user);
+            $locked = WorkflowStep::whereKey($step->id)->lockForUpdate()->firstOrFail();
+            if ($locked->status !== 'waiting') {
+                throw ValidationException::withMessages(['stage' => 'Someone else completed this stage first. Reload the page.']);
+            }
+            foreach ($fields as $name => $field) {
+                if ($field['type'] === 'file' && $answers[$name] instanceof UploadedFile) {
+                    $answers[$name] = self::storeFile($lockedRun, $locked, $name, $answers[$name], $user);
+                }
+            }
+            $locked->forceFill(['status' => 'pending', 'completed_by' => $user->id,
+                'data' => [...($locked->data ?? []), 'answers' => $answers, 'note' => $note,
+                    'submitted_at' => now()->toIso8601String(), 'submitted_by' => $user->id]])->save();
+            self::event($lockedRun, $step->step, 'completed', $user, $note, ['answers' => self::displayAnswers($answers)]);
+            self::advance($run->id, $user);
 
-        return 'completed';
+            return 'completed';
+        });
     }
 
     /** Replaces the PDF stored by a finished upload stage. */
@@ -364,17 +376,31 @@ class Workflows
         if (($fields[$field]['type'] ?? null) !== 'file' || ! $handler->canComplete($user) || $step->status !== 'done') {
             throw new InvalidArgumentException('This file cannot be replaced.');
         }
-        $data = $step->data ?? [];
-        $data['answers'][$field] = self::storeFile($step->run, $step, $field, $file, $user);
-        $step->forceFill(['data' => $data])->save();
+        DB::transaction(function () use ($step, $field, $file, $user) {
+            WorkflowRun::whereKey($step->workflow_run_id)->lockForUpdate()->firstOrFail();
+            $locked = WorkflowStep::whereKey($step->id)->lockForUpdate()->firstOrFail();
+            if ($locked->status !== 'done') {
+                throw ValidationException::withMessages(['file' => 'This stage changed. Reload before replacing its file.']);
+            }
+            $data = $locked->data ?? [];
+            $previous = $data['answers'][$field] ?? null;
+            $data['answers'][$field] = self::storeFile($locked->run, $locked, $field, $file, $user);
+            $locked->forceFill(['data' => $data])->save();
+            self::event($locked->run, $locked->step, 'file-replaced', $user, null,
+                ['field' => $field, 'previous' => $previous, 'replacement' => $data['answers'][$field]]);
+        });
     }
 
     private static function storeFile(WorkflowRun $run, WorkflowStep $step, string $field, UploadedFile $file, User $user): array
     {
-        $path = Storage::disk('local')->putFileAs("workflows/{$run->id}", $file, "{$step->step}-{$field}.pdf");
+        $path = Storage::disk('local')->putFileAs("workflows/{$run->id}", $file, "{$step->step}-{$field}-".Str::uuid().'.pdf');
+        if ($path === false) {
+            Log::error('Workflow PDF could not be stored.', ['run_id' => $run->id, 'step' => $step->step, 'field' => $field]);
+            throw ValidationException::withMessages(['file' => 'The PDF could not be stored. No saved file was replaced. Please try again or contact an administrator.']);
+        }
         $stored = ['name' => mb_substr($file->getClientOriginalName(), 0, 200), 'size' => $file->getSize(), 'path' => $path,
             'uploaded_at' => now()->toIso8601String(), 'uploaded_by' => $user->id];
-        self::event($run, $step->step, 'uploaded', $user, null, ['name' => $stored['name'], 'size' => $stored['size']]);
+        self::event($run, $step->step, 'uploaded', $user, null, $stored);
 
         return $stored;
     }

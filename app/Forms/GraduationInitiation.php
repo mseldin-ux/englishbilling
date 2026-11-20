@@ -15,7 +15,7 @@ final class GraduationInitiation
 
     public const TITLE = 'Adult Learner Graduation Initiation';
 
-    public const NOTICE = 'Certificates will be ordered on the 10th of each month. Please fill out this form, and the Final Grade form by the 10th of the month for the certificate to be ordered.';
+    public const NOTICE = 'Certificates will be ordered on the 16th of each month. Please fill out this form, and the Final Grade form by the 16th of the month for the certificate to be ordered.';
 
     public const QUESTIONS = [
         'program_complete' => 'Is the program complete?',
@@ -26,6 +26,7 @@ final class GraduationInitiation
     public const LABELS = [
         'student_id' => 'Adult Learner',
         'program_id' => 'Program',
+        'enrollment_id' => 'Program enrollment',
         ...self::QUESTIONS,
         'residency_location' => 'Residency location',
         'residency_date' => 'Residency date',
@@ -83,18 +84,20 @@ final class GraduationInitiation
         }
 
         $data = Validator::make($input, $rules, $messages, self::LABELS)->validate();
+        $scope = ProgramEnrollment::scope($input, (int) $data['student_id'], isset($data['program_id']) ? (int) $data['program_id'] : null, $form);
+        $data = [...$data, ...$scope];
         $result = [];
         foreach (array_keys(self::LABELS) as $field) {
             $value = $data[$field] ?? null;
             $result[$field] = match (true) {
                 array_key_exists($field, self::QUESTIONS) => (bool) $value,
-                in_array($field, ['student_id', 'program_id'], true) => $value === null ? null : (int) $value,
+                in_array($field, ['student_id', 'program_id', 'enrollment_id'], true) => $value === null ? null : (int) $value,
                 is_string($value) => trim($value) === '' ? null : trim($value),
                 default => $value,
             };
         }
 
-        return $result;
+        return [...$result, 'enrollment_key' => $scope['enrollment_key']];
     }
 
     /**

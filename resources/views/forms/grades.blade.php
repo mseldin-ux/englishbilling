@@ -20,10 +20,10 @@
 <div id="existing-sheets" class="existing-sheets" role="status" aria-live="polite"
     data-url="{{ route('forms.grades.existing') }}" data-current="{{ $sheet->id }}" @if(!$existing) hidden @endif>
     @if($existing)
-        <p><strong>{{ $sheet->exists ? 'This learner has other grade sheets:' : 'This learner already has grade sheets. Open an existing sheet rather than starting over:' }}</strong></p>
+        <p><strong>This learner already has grade sheets. Reuse a sheet only for the same program enrollment:</strong></p>
         <ul>
             @foreach($existing as $other)
-                <li data-program="{{ $other['program_id'] }}"><a href="{{ $other['url'] }}">Sheet {{ $other['id'] }} — {{ $other['program'] }} — {{ $other['status'] === 'submitted' ? 'Submitted' : 'Draft' }}, updated {{ $other['updated_at'] }}</a>@if($loop->first) (most recent)@endif</li>
+                <li data-program="{{ $other['program_id'] }}"><a href="{{ $other['url'] }}">Sheet {{ $other['id'] }} — {{ $other['program'] }} — {{ $other['enrollment_key'] }} — {{ $other['status'] === 'submitted' ? 'Submitted' : 'Draft' }}, updated {{ $other['updated_at'] }}</a>@if($loop->first) (most recent)@endif</li>
             @endforeach
         </ul>
     @endif
@@ -72,6 +72,7 @@
             </label>
             <p id="duplicate-sheet" class="warning" role="alert" hidden></p>
         @endif
+        @include('forms.program-enrollment', ['enrollmentRecord' => $sheet])
     </fieldset>
     <fieldset>
         <legend>Grades</legend>

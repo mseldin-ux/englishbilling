@@ -8,7 +8,14 @@
 
     function initialize(root = document) {
         root.querySelectorAll('form[data-dirty]').forEach(form => snapshots.set(form, values(form)));
+        root.querySelectorAll('[name="email_invoice"]').forEach(input => toggleInvoiceEmail(input));
         updateRemaining();
+    }
+
+    function toggleInvoiceEmail(input) {
+        input.form.querySelector('[data-invoice-email-fields]').hidden = !input.checked;
+        input.form.elements.email_message.required = input.checked;
+        input.form.elements.email_subject.required = input.checked;
     }
 
     function status(form, text, error = false) {
@@ -49,6 +56,39 @@
             throw new Error(messages.join('\n'));
         }
         return result;
+    }
+
+    async function prepareInvoiceEmail(form) {
+        if (form.dataset.saving) return;
+        if (form.dataset.emailEdited && !confirm('Replace your edited email with a fresh preview from the template?')) return;
+        const data = form.dataset.invoiceId ? { invoice_id: form.dataset.invoiceId } : Object.fromEntries(values(form));
+        const restore = lockControls([...form.elements]);
+        form.dataset.saving = '1';
+        status(form, 'Preparing email preview...');
+        try {
+            const preview = await request(form.dataset.emailPreviewUrl, data);
+            form.elements.email_subject.value = preview.subject;
+            form.elements.email_message.value = preview.text;
+            form.querySelector('[data-email-from]').textContent = preview.from || 'No email in your user profile';
+            form.querySelector('[data-email-to]').textContent = preview.to || 'No learner email recorded';
+            form.dataset.emailPreviewReady = '1';
+            delete form.dataset.emailEdited;
+            delete form.dataset.emailPreviewStale;
+            status(form, 'Email preview ready. You can edit the subject and message.');
+        } catch (error) {
+            status(form, `Unable to prepare the email preview. ${error.message}`, true);
+        } finally {
+            delete form.dataset.saving;
+            restore();
+        }
+    }
+
+    function invoicePreviewChanged(form) {
+        if (!form.dataset.emailPreviewReady) return;
+        form.dataset.emailPreviewStale = '1';
+        if (form.elements.email_invoice.checked) {
+            status(form, 'Invoice details changed. Your email text was kept; refresh from the template or update the message to match.');
+        }
     }
 
     async function loadSection(section, confirmChanges = true) {
@@ -106,7 +146,7 @@
         const editor = document.querySelector('.schedule-editor');
         if (!editor) return;
         const generator = document.getElementById('schedule-generator');
-        const fees = cents(document.querySelector('.ledger-summary')?.dataset.fees ?? editor.dataset.fees);
+        const fees = cents(document.querySelector('.ledger-summary')?.dataset.currentFees ?? editor.dataset.fees);
         const fee = generator.elements.exclude_app_fee.checked ? cents(generator.elements.app_fee.value) : 0n;
         let total = 0n;
         let valid = fees !== null && fee !== null;
@@ -158,19 +198,34 @@
 
     document.addEventListener('input', event => {
         const form = event.target.form;
+        if (form?.dataset.emailPreviewUrl && ['email_subject', 'email_message'].includes(event.target.name)) {
+            form.dataset.emailEdited = '1';
+        }
         if (form?.hasAttribute('data-dirty')) dirty(form);
         updateRemaining();
     });
 
     document.addEventListener('change', event => {
         const input = event.target;
+        if (input.name === 'email_invoice') {
+            toggleInvoiceEmail(input);
+            if (input.checked && !input.form.dataset.emailEdited
+                && (!input.form.dataset.emailPreviewReady || input.form.dataset.emailPreviewStale)) prepareInvoiceEmail(input.form);
+        }
         if (input.type === 'checkbox' && input.form) {
             const hidden = [...input.form.elements].find(other => other.type === 'hidden' && other.name === input.name);
             if (hidden) hidden.value = '0';
         }
         if (input.form?.hasAttribute('data-dirty')) dirty(input.form);
+        if (input.closest('[data-invoice-fields]') || (input.name === 'email_invoice' && input.form.dataset.emailPreviewStale)) invoicePreviewChanged(input.form);
         updateRemaining();
     });
+
+    document.addEventListener('toggle', event => {
+        if (!event.target.matches('details[data-invoice-email]') || !event.target.open) return;
+        const form = event.target.querySelector('form');
+        if (!form.dataset.emailPreviewReady && !form.dataset.emailEdited) prepareInvoiceEmail(form);
+    }, true);
 
     document.addEventListener('cancel', event => {
         if (event.target.querySelector('form[data-saving]')) event.preventDefault();
@@ -217,6 +272,7 @@
         }
         let restore = () => {};
         let savedMessage = '';
+        let emailing = false;
         try {
             const old = (form.dataset.oldDates || '').split(',').some(date => date && (Date.now() - new Date(`${date}T00:00:00`).getTime()) > 30 * 86400000);
             if (old && !confirm('This record references events over 30 days old, which may have been reconciled. Really save changes?')) return;
@@ -230,11 +286,30 @@
             const data = changedData(form);
             restore = lockControls([...form.elements]);
             form.dataset.saving = '1';
-            const result = await request(form.action, data);
+            const result = form.dataset.invoiceEmailUrl
+                ? { message: form.dataset.invoiceCreatedMessage }
+                : await request(form.action, data);
             savedMessage = result.message;
+            if (form.id === 'new-invoices' && (data.email_invoice === '1' || form.dataset.invoiceEmailUrl)) {
+                form.dataset.invoiceEmailUrl ||= result.email_url;
+                form.dataset.invoiceCreatedMessage ||= result.message;
+                if (result.invoice_id) form.dataset.invoiceId = String(result.invoice_id);
+                if (!form.dataset.invoiceEmailed) {
+                    emailing = true;
+                    form.elements.email_subject.value = data.email_subject.replaceAll('{invoice_id}', form.dataset.invoiceId);
+                    form.elements.email_message.value = data.email_message.replaceAll('{invoice_id}', form.dataset.invoiceId);
+                    const emailed = await request(form.dataset.invoiceEmailUrl, {
+                        email_previewed: data.email_previewed, email_subject: data.email_subject, email_message: data.email_message,
+                    });
+                    form.dataset.invoiceEmailed = '1';
+                    result.message += ` ${emailed.message}`;
+                    emailing = false;
+                }
+            }
             delete form.dataset.saving;
             restore();
             form.classList.remove('dirty');
+            if (form.hasAttribute('data-invoice-email')) form.dataset.confirm = 'This invoice has already been emailed. Send it again?';
             if (!form.hasAttribute('data-partial') && form.dataset.refresh) {
                 if (form.elements._method?.value === 'DELETE') {
                     form.closest('tr')?.remove();
@@ -243,10 +318,37 @@
                         document.getElementById(`invoice-dialog-${id}`)?.remove();
                     }
                 }
-                else form.reset();
+                else if (!form.dataset.invoiceEmailUrl && !form.hasAttribute('data-invoice-email')) {
+                    form.reset();
+                    if (form.dataset.emailPreviewUrl) {
+                        delete form.dataset.emailPreviewReady;
+                        delete form.dataset.emailEdited;
+                        delete form.dataset.emailPreviewStale;
+                        toggleInvoiceEmail(form.elements.email_invoice);
+                    }
+                }
             }
             snapshots.set(form, values(form));
             if (result.version) form.elements.version.value = result.version;
+            if (result.enrollmentHtml) {
+                const history = document.getElementById('enrollment-history');
+                if (history && !history.querySelector('form.dirty')) {
+                    const template = document.createElement('template');
+                    template.innerHTML = result.enrollmentHtml;
+                    const replacement = template.content.firstElementChild;
+                    history.replaceWith(replacement);
+                    initialize(replacement);
+                } else if (history) {
+                    let warning = history.querySelector('.enrollment-refresh-warning');
+                    if (!warning) {
+                        warning = document.createElement('p');
+                        warning.className = 'enrollment-refresh-warning';
+                        warning.setAttribute('role', 'alert');
+                        history.prepend(warning);
+                    }
+                    warning.textContent = 'Learner details saved. Your unsaved enrollment edits were preserved, but these controls are now out of date. Copy your edits and reload before changing enrollment history.';
+                }
+            }
             status(form, result.message);
             form.closest('dialog')?.close();
             if (form.dataset.refresh) {
@@ -259,7 +361,9 @@
                 }
             }
         } catch (error) {
-            const text = savedMessage ? `${savedMessage} Display refresh failed. Reload the section. ${error.message}` : error.message;
+            const text = savedMessage
+                ? `${savedMessage} ${emailing ? 'Email not confirmed. Retry email only, or close and use Edit Invoice to email the saved PDF later.' : 'Display refresh failed. Reload the section.'} ${error.message}`
+                : error.message;
             status(form, text, true);
             if (form.dataset.refresh) {
                 const message = document.querySelector(`#${form.dataset.refresh} .section-status`);
@@ -269,11 +373,17 @@
         } finally {
             delete form.dataset.saving;
             restore();
+            if (form.dataset.invoiceEmailUrl) {
+                form.querySelector('[data-invoice-fields]').disabled = true;
+                form.elements.email_invoice.disabled = true;
+                form.querySelector('button:not([type="button"])').textContent = form.dataset.invoiceEmailed ? 'Reload invoice list' : 'Retry email only';
+            }
         }
     });
 
     document.addEventListener('click', async event => {
         const target = event.target.closest('button, a');
+        if (target?.hasAttribute('data-refresh-email-preview')) prepareInvoiceEmail(target.form);
         if (target?.dataset.open) document.getElementById(target.dataset.open).showModal();
         if (target?.hasAttribute('data-close-dialog')) target.closest('dialog').close();
         if (target?.hasAttribute('data-load-section')) {
@@ -340,6 +450,7 @@
                 document.getElementById('new-invoice-dialog').showModal();
                 form.elements.invoicereference.focus();
                 dirty(form);
+                invoicePreviewChanged(form);
             } catch (error) {
                 document.querySelector('#invoices .section-status').textContent = error.message;
             }

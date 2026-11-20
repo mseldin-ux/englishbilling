@@ -73,8 +73,14 @@ final class Graduation
     /** The submitted Final Grades sheet for the learner and the form's program. */
     public function gradeSheet(): ?FinalGrade
     {
-        return FinalGrade::where('studentid', $this->student->id)->where('program_id', $this->form->program_id)
+        return $this->gradeSheets()
             ->where('status', 'submitted')->first();
+    }
+
+    public function gradeSheets(): \Illuminate\Database\Eloquent\Builder
+    {
+        return FinalGrade::where('studentid', $this->student->id)->where('program_id', $this->form->program_id)
+            ->where('enrollment_key', $this->form->enrollment_key);
     }
 
     /** @return array<int, string> */

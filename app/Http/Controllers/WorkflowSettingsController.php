@@ -23,17 +23,26 @@ class WorkflowSettingsController extends Controller
             $values[$key] = Settings::get($key);
         }
         $stages = [];
+        $notifications = [];
         foreach (array_keys(Workflows::all()) as $workflow) {
             foreach (Workflows::steps($workflow) as $key => $step) {
                 if ($step instanceof ManualStep) {
                     $stages[$workflow][$key] = ['step' => $step, 'override' => Settings::stage($workflow, $key)];
+                }
+                if ($step instanceof ManualStep && $step->isApproval()) {
+                    $notifications[$workflow][$key] = ['step' => $step,
+                        'fallback' => $step->role() === 'finance' ? 'Finance team' : 'Records approval team'];
+                } elseif ($workflow === 'course-completion' && $step instanceof EmailStep && array_key_exists($key, Settings::STAFF_EMAILS)) {
+                    $setting = Settings::STAFF_EMAILS[$key];
+                    $notifications[$workflow][$key] = ['step' => $step,
+                        'fallback' => $setting ? Settings::DEFINITIONS[$setting]['label'] : 'Submitting director’s login email'];
                 }
             }
         }
 
         return view('workflows.settings', ['definitions' => Settings::DEFINITIONS, 'values' => $values,
             'programs' => Program::orderBy('programdesc')->get(['id', 'programdesc', 'shortname', 'type', 'director_team_email', 'course_completion_survey_url', 'employer_survey_url', 'employment_form_url']),
-            'stages' => $stages, 'workflows' => Workflows::all()]);
+            'stages' => $stages, 'notifications' => $notifications, 'workflows' => Workflows::all()]);
     }
 
     public function update(Request $request)
@@ -53,6 +62,7 @@ class WorkflowSettingsController extends Controller
             'programs.*.employment_form_url' => ['nullable', 'url:http,https', 'max:500'],
             'stages' => ['array'], 'stages.*.*.title' => ['nullable', 'string', 'max:200'],
             'stages.*.*.instructions' => ['nullable', 'string', 'max:5000'], 'stages.*.*.labels.*' => ['nullable', 'string', 'max:500'],
+            'notifications' => ['array'], 'notifications.*' => ['array'], 'notifications.*.*' => ['nullable', 'string', 'max:2000'],
         ], [], ['settings.correction_wait_days' => 'correction waiting period', 'programs.*.course_completion_survey_url' => 'Course Completion Survey link',
             'programs.*.employer_survey_url' => 'Employer Graduate Survey link', 'programs.*.employment_form_url' => 'Employment Question Form link']);
         $errors = [];
@@ -63,6 +73,11 @@ class WorkflowSettingsController extends Controller
         }
         foreach ($data['programs'] ?? [] as $id => $values) {
             $errors += $this->invalidAddresses("programs.{$id}.director_team_email", $values['director_team_email'] ?? '');
+        }
+        foreach ($data['notifications'] ?? [] as $workflow => $stages) {
+            foreach ($stages as $key => $recipients) {
+                $errors += $this->invalidAddresses("notifications.{$workflow}.{$key}", $recipients ?? '');
+            }
         }
         if ($errors !== []) {
             throw ValidationException::withMessages($errors);
@@ -110,10 +125,26 @@ class WorkflowSettingsController extends Controller
                     $title = trim((string) ($override['title'] ?? ''));
                     $instructions = trim(str_replace("\r\n", "\n", (string) ($override['instructions'] ?? '')));
                     Settings::putStage($workflow, $key, [
+                        ...Settings::stage($workflow, $key),
                         'title' => $title !== $step->defaultTitle() ? $title : '',
                         'instructions' => $instructions !== (string) $step->defaultInstructions() ? $instructions : '',
                         'labels' => $labels,
                     ], $user);
+                }
+            }
+            foreach ($data['notifications'] ?? [] as $workflow => $stages) {
+                if (! array_key_exists($workflow, Workflows::all())) {
+                    throw ValidationException::withMessages(['notifications' => 'Unknown workflow.']);
+                }
+                $handlers = Workflows::steps($workflow);
+                foreach ($stages as $key => $recipients) {
+                    $step = $handlers[$key] ?? null;
+                    if (! (($step instanceof ManualStep && $step->isApproval())
+                        || ($workflow === 'course-completion' && $step instanceof EmailStep && array_key_exists($key, Settings::STAFF_EMAILS)))) {
+                        throw ValidationException::withMessages(['notifications' => 'Unknown staff notification stage.']);
+                    }
+                    Settings::putStage($workflow, $key, [...Settings::stage($workflow, $key),
+                        'recipients' => implode(', ', EmailStep::addresses($recipients))], $user);
                 }
             }
         });
