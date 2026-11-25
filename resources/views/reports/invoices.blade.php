@@ -4,7 +4,8 @@
 @include('reports.invoices-form', ['filters' => $report['filters']])
 <details><summary>Calculation rules and legacy exceptions</summary>
     <p>Sent-date bounds include midnight at both dates. Received rows match Payment/Credit substrings, regardless
-        of invoice links. Their lower bound uses customer date and upper bound uses processed date.
+        of invoice links. Both payment date bounds use Our Date. Legacy status filters use the
+        effective status date when available, or current status when it is missing.
         Invoiced/received totals sum absolute amounts; detail amounts keep their signs.
         Learner outstanding is clamped to zero and excess becomes prepayment. Overall outstanding is not clamped.
         Without Show Received, legacy learner outstanding stays zero while overall outstanding equals invoiced.</p>

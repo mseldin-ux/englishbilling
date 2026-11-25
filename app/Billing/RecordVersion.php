@@ -2,8 +2,11 @@
 
 namespace App\Billing;
 
+use App\Models\Invoice;
 use App\Models\Student;
+use App\Models\StudentTransaction;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 final class RecordVersion
@@ -30,6 +33,13 @@ final class RecordVersion
         unset($attributes['invoice_file'], $attributes['has_pdf'], $attributes['emailed_at']);
         if ($model instanceof Student) {
             unset($attributes['balance']);
+        }
+        if (config('billing.concurrent_stages') && $model->exists
+            && ($model instanceof Invoice || $model instanceof StudentTransaction)) {
+            $invoice = $model instanceof Invoice;
+            $attributes['_stage_allocations'] = DB::table($invoice ? 'invoice_stage_allocations' : 'transaction_stage_allocations')
+                ->where($invoice ? 'invoice_id' : 'transaction_id', $model->id)
+                ->orderBy('stage_enrollment_id')->get(['stage_enrollment_id', 'amount'])->toArray();
         }
         ksort($attributes);
 

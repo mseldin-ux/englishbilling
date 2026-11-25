@@ -10,6 +10,7 @@
         <script src="{{ asset('js/billing.js') }}" defer></script>
     @endif
     @auth <script src="{{ asset('js/edit-locks.js') }}" defer></script> @endauth
+    @auth <script src="{{ asset('js/enrollment-confirm.js') }}" defer></script> @endauth
 </head>
 <body>
 <header>
@@ -62,7 +63,19 @@
     @if(session('status')) <p role="status">{{ session('status') }}</p> @endif
     @if($errors->any())
         <div role="alert">
-            <ul>@foreach($errors->all() as $error) <li>{{ $error }}</li> @endforeach</ul>
+            <ul>
+                @foreach($errors->getMessages() as $field => $messages)
+                    @foreach($messages as $error)
+                        <li>
+                            @if(preg_match('/\Areport_student\.(\d+)\z/', $field, $match))
+                                <a href="{{ route('students.show', $match[1]) }}">{{ $error }}</a>
+                            @else
+                                {{ $error }}
+                            @endif
+                        </li>
+                    @endforeach
+                @endforeach
+            </ul>
         </div>
     @endif
     @yield('content')

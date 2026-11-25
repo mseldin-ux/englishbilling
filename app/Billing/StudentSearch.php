@@ -15,6 +15,7 @@ final class StudentSearch
         return [
             'query' => ['nullable', 'string', 'max:255'],
             'showall' => ['sometimes', 'boolean'],
+            'include_unenrolled' => ['sometimes', 'boolean'],
             'graduation_date' => ['nullable', 'date_format:Y-m-d'],
             'past_due_start' => ['nullable', 'date_format:Y-m-d'],
             'past_due_end' => ['nullable', 'date_format:Y-m-d'],
@@ -36,6 +37,19 @@ final class StudentSearch
     public static function query(array $filters): Builder
     {
         $query = Student::query();
+        if (empty($filters['include_unenrolled'])) {
+            $term = trim((string) ($filters['query'] ?? ''));
+            $query->where(function (Builder $q) use ($term) {
+                $q->where('hasenrolled', true);
+                if ($term !== '') {
+                    if (ctype_digit($term)) {
+                        $q->orWhere('id', $term);
+                    } else {
+                        $q->orWhere(fn (Builder $names) => self::nameSearch($names, $term));
+                    }
+                }
+            });
+        }
         $stageFilter = fn ($q) => $q
             ->when(! empty($filters['stage']), fn ($q) => $q->where('stage', $filters['stage']))
             ->when(! empty($filters['start_from']), fn ($q) => $q->whereDate('started_on', '>=', $filters['start_from']))
@@ -54,7 +68,9 @@ final class StudentSearch
                     });
                 }
                 $matches->orWhereHas('enrollments', function (Builder $enrollments) use ($filters, $hasStage, $stageFilter) {
-                    $enrollments->when(! empty($filters['program_id']), fn ($q) => $q->where('program_id', $filters['program_id']));
+                    $enrollments->when(! empty($filters['program_id']), fn ($q) => $q->where(fn ($q) => $q
+                        ->where('program_id', $filters['program_id'])
+                        ->orWhereHas('stages', fn ($q) => $stageFilter($q)->where('program_id', $filters['program_id']))));
                     if ($hasStage) {
                         $enrollments->whereHas('stages', $stageFilter);
                     }
@@ -76,6 +92,7 @@ final class StudentSearch
                 $query->where('id', $term);
             } else {
                 $query->where(function (Builder $q) use ($term) {
+                    $q->where(fn (Builder $names) => self::nameSearch($names, $term));
                     foreach (['first_name', 'last_name', 'city', 'state', 'country',
                         'school', 'studentcomments', 'student_notes', 'emailaddr'] as $field) {
                         $q->orWhere($field, 'like', '%'.$term.'%');
@@ -122,5 +139,14 @@ final class StudentSearch
         }
 
         return $query;
+    }
+
+    private static function nameSearch(Builder $query, string $term): void
+    {
+        foreach (preg_split('/\s+/', trim($term), -1, PREG_SPLIT_NO_EMPTY) as $part) {
+            $query->where(fn (Builder $names) => $names->where('first_name', 'like', '%'.$part.'%')
+                ->orWhere('middle_name', 'like', '%'.$part.'%')
+                ->orWhere('last_name', 'like', '%'.$part.'%'));
+        }
     }
 }

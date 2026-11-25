@@ -8,6 +8,7 @@ use App\Models\StudentEnrollment;
 use App\Models\StudentStageEnrollment;
 use App\Models\User;
 use App\Workflows\TemplateDefinition;
+use Illuminate\Support\Facades\DB;
 
 final class InvoiceEmail
 {
@@ -25,7 +26,7 @@ final class InvoiceEmail
                 'learner_email' => 'Learner email address(es) on the student record',
                 'cohort' => 'Cohort (current learner record)',
                 'program' => 'Invoice enrollment program, or current learner program for an unattributed legacy invoice',
-                'stage' => 'Invoice stage number (blank for a whole-program or legacy invoice)',
+                'stage' => 'Invoice stage number(s), separated by commas (blank for a whole-program or legacy invoice)',
                 'invoice_id' => 'Invoice ID',
                 'invoice_reference' => 'Saved invoice reference',
                 'invoice_amount' => 'Saved invoice amount, two decimal places without a currency symbol (blank if not recorded)',
@@ -52,7 +53,7 @@ TEXT,
     }
 
     /** @return array<string, string> */
-    public static function variables(Student $student, Invoice $invoice, User $sender): array
+    public static function variables(Student $student, Invoice $invoice, User $sender, array $allocationStageIds = []): array
     {
         $program = $invoice->enrollment_id
             ? StudentEnrollment::findOrFail($invoice->enrollment_id)->program
@@ -60,6 +61,20 @@ TEXT,
         $stage = $invoice->stage_enrollment_id
             ? StudentStageEnrollment::findOrFail($invoice->stage_enrollment_id)->stage
             : null;
+        if (config('billing.concurrent_stages')) {
+            if ($invoice->exists) {
+                $allocationStageIds = DB::table('invoice_stage_allocations')->where('invoice_id', $invoice->id)
+                    ->pluck('stage_enrollment_id')->all();
+            }
+            if ($allocationStageIds) {
+                $stages = StudentStageEnrollment::where('enrollment_id', $invoice->enrollment_id)
+                    ->whereIn('id', $allocationStageIds)->orderBy('stage')->pluck('stage');
+                if ($stages->count() !== count(array_unique($allocationStageIds))) {
+                    Enrollments::error('Invoice allocations must belong to its program enrollment.');
+                }
+                $stage = $stages->implode(', ');
+            }
+        }
 
         return [
             'learner_first_name' => $student->first_name ?: $student->displayName(),

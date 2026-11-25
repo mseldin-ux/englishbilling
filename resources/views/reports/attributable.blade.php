@@ -24,7 +24,7 @@
     <p>Refunds/reversals appear in type totals but are not deducted from the legacy paid calculation.
         “Discounts” (plural) is not a recognized discount category in this report.
         Archived learners enrolled before 2022 and certain completed lifecycle states are forced to 100%.
-        LOAs are added individually using the legacy last-row clipping rule, not merged.
+        Leave periods are clipped at the report end; overlapping days are counted once.
         Suspension sets the diagnostic last date but does not cap service time; PIF alone does not force 100%.
         Learner earned income shows six decimal places for reconciliation; the aggregate is rounded once to cents.</p>
 </details>

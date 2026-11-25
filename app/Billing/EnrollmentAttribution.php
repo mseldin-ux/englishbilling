@@ -28,7 +28,7 @@ final class EnrollmentAttribution
         foreach ($student->loadMissing('enrollments.program', 'enrollments.stages')->enrollments as $enrollment) {
             if ($enrollment->mode === 'staged') {
                 foreach ($enrollment->stages as $stage) {
-                    $options[$enrollment->id.':'.$stage->id] = $enrollment->label().' / Stage '.$stage->stage.' — '.$stage->started_on->format('Y-m-d');
+                    $options[$enrollment->id.':'.$stage->id] = $enrollment->label().' / Stage '.$stage->stage.' - '.$stage->label().' — '.$stage->started_on->format('Y-m-d');
                 }
             } else {
                 $options[$enrollment->id.':'] = $enrollment->label();
@@ -58,6 +58,11 @@ final class EnrollmentAttribution
         }
         if ($student->current_enrollment_id && $explicit) {
             throw ValidationException::withMessages(['billing_period' => 'Choose the program/stage for this entry.']);
+        }
+        if (config('billing.concurrent_stages') && ! $record
+            && $student->currentEnrollment?->mode === 'staged'
+            && $student->currentEnrollment->stages->count() > 1) {
+            throw ValidationException::withMessages(['billing_period' => 'Choose the stage for this entry.']);
         }
 
         return [...$data, ...self::current($student)];

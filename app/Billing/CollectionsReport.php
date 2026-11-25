@@ -7,12 +7,12 @@ use Illuminate\Validation\ValidationException;
 
 final class CollectionsReport
 {
-    public const HEADERS = ['student id', 'active?', 'name', 'enrollment date', 'due date', 'amount due', 'remaining balance'];
+    public const HEADERS = ['student id', 'active?', 'name', 'enrollment date', 'due date', 'amount due', 'remaining balance', 'program'];
 
     public static function run(array $filters): array
     {
         return DB::transaction(function () use ($filters) {
-            $query = DB::table('students')->where(fn ($q) => $q->whereNull('graduated')->orWhere('graduated', false))
+            $query = DB::table('students')->where('hasenrolled', true)->where(fn ($q) => $q->whereNull('graduated')->orWhere('graduated', false))
                 ->select('id', 'inactive', 'first_name', 'middle_name', 'last_name', 'start_date',
                     'next_due_date', 'payment_amount_due', 'balance')->orderBy('start_date')->orderBy('id');
             foreach (['enrolldate' => ['start_date', '>='], 'enrolledbeforedate' => ['start_date', '<'],
@@ -25,6 +25,7 @@ final class CollectionsReport
             if (! empty($filters['hideinactive'])) {
                 $query->where(fn ($q) => $q->whereNull('inactive')->orWhere('inactive', false));
             }
+            ReportPrograms::filter($query, 'students.id', 'collections', $filters);
             $rows = [];
             $displayNames = [];
             $total = '0.00';
@@ -43,6 +44,11 @@ final class CollectionsReport
                     'amount' => $student->payment_amount_due === null ? '' : Money::cents((string) $student->payment_amount_due),
                     'balance' => $balance];
             }
+            $programs = ReportPrograms::labels(array_column($rows, 'id'), 'collections', $filters);
+            foreach ($rows as &$row) {
+                $row['program'] = $programs[$row['id']] ?? 'No program recorded for period';
+            }
+            unset($row);
 
             return ['filters' => $filters, 'rows' => $rows, 'total' => $total, 'displayNames' => $displayNames];
         });

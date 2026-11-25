@@ -59,7 +59,7 @@ class RecordsController extends Controller
 
     public function create()
     {
-        return view('records.form', ['student' => new Student, 'fields' => RecordsFields::fields(),
+        return view('records.form', ['student' => (new Student)->forceFill(['hasenrolled' => false]), 'fields' => RecordsFields::fields(),
             'accessStatuses' => $this->statuses(), 'editLock' => null]);
     }
 
@@ -83,7 +83,7 @@ class RecordsController extends Controller
     public function store(Request $request)
     {
         $student = new Student;
-        $student->forceFill($this->data($request, false));
+        $student->forceFill(['hasenrolled' => false, ...$this->data($request, false)]);
         $student->balance = '0.00';
         $student->save();
 

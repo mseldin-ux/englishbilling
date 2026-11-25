@@ -12,7 +12,8 @@ class StudentEnrollment extends Model
 
     protected function casts(): array
     {
-        return ['legacy_context' => 'array', 'started_on' => 'immutable_date', 'ended_on' => 'immutable_date'];
+        return ['legacy_context' => 'array', 'started_on' => 'immutable_date', 'ended_on' => 'immutable_date',
+            'program_stages' => 'boolean'];
     }
 
     public function program(): BelongsTo

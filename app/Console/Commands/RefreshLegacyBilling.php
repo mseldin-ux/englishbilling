@@ -54,7 +54,8 @@ class RefreshLegacyBilling extends Command
             : 'Applying this refresh will discard test enrollment history and reset billing attribution. Stage settings and logins will be retained.');
         $this->table([$apply ? 'Enrollment history discarded' : 'Enrollment history to discard', 'Rows'], array_map(
             fn (string $table, int $count) => [$table, $count],
-            array_keys($report['enrollment_reset']), array_values($report['enrollment_reset']),
+            array_keys([...$report['enrollment_reset'], ...$report['allocation_reset']]),
+            array_values([...$report['enrollment_reset'], ...$report['allocation_reset']]),
         ));
         $path = 'imports/refresh-'.now()->format('Ymd-His').'-'.bin2hex(random_bytes(4)).'.json';
         if (! Storage::disk('local')->put($path, json_encode($report, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR))) {

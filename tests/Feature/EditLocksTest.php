@@ -35,7 +35,8 @@ class EditLocksTest extends TestCase
         $this->aliceCookie = str_repeat('a', 40);
         $this->bobCookie = str_repeat('b', 40);
         $this->student = new Student;
-        $this->student->forceFill(['first_name' => 'Synthetic', 'balance' => '0.00'])->save();
+        $this->student->forceFill(['first_name' => 'Synthetic', 'balance' => '0.00', 'hasenrolled' => false,
+            'start_date' => '2020-01-01'])->save();
         $this->asSession($this->alice, $this->aliceCookie);
     }
 

@@ -7,6 +7,25 @@
     const ignored = new Set(['_token', '_method', 'version']);
 
     function initialize(root = document) {
+        root.querySelectorAll('form[data-certificate-values]').forEach(form => {
+            const certificates = JSON.parse(form.dataset.certificateValues);
+            const selector = form.elements.certificate_program_id;
+            const inputs = [...form.querySelectorAll('[data-certificate-field]')];
+            const local = new Map(inputs.map(input => [input.name, input.dataset.localValue]));
+            const update = () => {
+                const linked = Boolean(selector.value);
+                inputs.forEach(input => {
+                    input.readOnly = linked;
+                    input.value = linked ? (certificates[selector.value]?.[input.name] ?? '') : local.get(input.name);
+                });
+                form.querySelector('[data-certificate-hint]').hidden = !linked;
+            };
+            inputs.forEach(input => input.addEventListener('input', () => {
+                if (!selector.value) local.set(input.name, input.value);
+            }));
+            selector.addEventListener('change', update);
+            update();
+        });
         root.querySelectorAll('form[data-dirty]').forEach(form => snapshots.set(form, values(form)));
         root.querySelectorAll('[name="email_invoice"]').forEach(input => toggleInvoiceEmail(input));
         updateRemaining();
@@ -61,7 +80,7 @@
     async function prepareInvoiceEmail(form) {
         if (form.dataset.saving) return;
         if (form.dataset.emailEdited && !confirm('Replace your edited email with a fresh preview from the template?')) return;
-        const data = form.dataset.invoiceId ? { invoice_id: form.dataset.invoiceId } : Object.fromEntries(values(form));
+        const data = form.dataset.invoiceId ? { invoice_id: form.dataset.invoiceId } : changedData(form);
         const restore = lockControls([...form.elements]);
         form.dataset.saving = '1';
         status(form, 'Preparing email preview...');
@@ -123,9 +142,18 @@
     function changedData(form) {
         const current = values(form);
         const original = snapshots.get(form);
-        if (!form.hasAttribute('data-partial')) return Object.fromEntries(current);
-        if (!original) throw new Error('Form state is unavailable. Reload before saving.');
-        return Object.fromEntries([...current].filter(([key, value]) => ignored.has(key) || value !== original.get(key)));
+        const partial = form.hasAttribute('data-partial');
+        if (partial && !original) throw new Error('Form state is unavailable. Reload before saving.');
+        const data = Object.fromEntries([...current].filter(([key, value]) => !partial || ignored.has(key) || value !== original.get(key)));
+        const allocationEntries = [...current].filter(([key]) => key.startsWith('stage_allocation_'));
+        const allocationChanged = allocationEntries.some(([key, value]) => !partial || value !== original.get(key));
+        allocationEntries.forEach(([key]) => delete data[key]);
+        if (allocationChanged) {
+            const allocations = allocationEntries.filter(([, value]) => value.trim() !== '')
+                .map(([key, amount]) => ({ stage_enrollment_id: Number(key.slice('stage_allocation_'.length)), amount }));
+            if (partial || allocations.length) data.allocations = allocations;
+        }
+        return data;
     }
 
     function cents(value) {
@@ -146,7 +174,8 @@
         const editor = document.querySelector('.schedule-editor');
         if (!editor) return;
         const generator = document.getElementById('schedule-generator');
-        const fees = cents(document.querySelector('.ledger-summary')?.dataset.currentFees ?? editor.dataset.fees);
+        const fees = cents(editor.hasAttribute('data-stage-specific')
+            ? editor.dataset.fees : (document.querySelector('.ledger-summary')?.dataset.currentFees ?? editor.dataset.fees));
         const fee = generator.elements.exclude_app_fee.checked ? cents(generator.elements.app_fee.value) : 0n;
         let total = 0n;
         let valid = fees !== null && fee !== null;
@@ -389,6 +418,23 @@
         if (target?.hasAttribute('data-load-section')) {
             try { await loadSection(target.closest('section')); } catch { /* The section displays the error. */ }
         }
+        if (target?.hasAttribute('data-select-schedule')) {
+            const section = target.closest('section');
+            const selected = section.querySelector('[data-schedule-stage]').value;
+            if (!selected) {
+                section.querySelector('.section-status').textContent = 'Choose a stage first.';
+                return;
+            }
+            const previous = section.dataset.load;
+            const url = new URL(previous, window.location.href);
+            url.searchParams.set('billing_period', selected);
+            section.dataset.load = url.toString();
+            try {
+                if (!await loadSection(section)) section.dataset.load = previous;
+            } catch {
+                section.dataset.load = previous;
+            }
+        }
         if (target?.hasAttribute('data-create-invoice')) {
             try {
                 const section = document.getElementById('invoices');
@@ -433,7 +479,8 @@
             form.elements.invoice_id.value = target.dataset.payInvoice;
             form.elements.processeddate.value = date;
             form.elements.transactiontype.value = 'Payment';
-            form.elements.transactionamount.value = amount === null ? '' : money(amount);
+            form.elements.transactionamount.value = amount === null ? ''
+                : money(target.hasAttribute('data-payment-negative') ? -(amount < 0n ? -amount : amount) : amount);
             form.elements.transactiondate.focus();
             form.scrollIntoView({ block: 'center' });
             dirty(form);
@@ -447,6 +494,9 @@
                 form.elements.amount.value = target.dataset.plannedAmount;
                 form.elements.nextdate.value = target.dataset.plannedDate;
                 form.elements.notes.value = target.dataset.plannedNotes;
+                if (target.dataset.plannedPeriod && form.elements.billing_period) {
+                    form.elements.billing_period.value = target.dataset.plannedPeriod;
+                }
                 document.getElementById('new-invoice-dialog').showModal();
                 form.elements.invoicereference.focus();
                 dirty(form);

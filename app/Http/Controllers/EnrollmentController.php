@@ -6,6 +6,7 @@ use App\Billing\Enrollments;
 use App\Billing\RecordVersion;
 use App\Models\Program;
 use App\Models\Student;
+use App\Models\StudentEnrollment;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -14,13 +15,19 @@ class EnrollmentController extends Controller
     public function store(Request $request, Student $student)
     {
         $data = $request->validate([
-            'version' => ['required', 'string'], 'action' => ['required', 'in:program,stage,complete,correct,reopen,resume,undo,cancel'],
+            'version' => ['required', 'string'], 'action' => ['required', 'in:program,stage,complete,graduate,correct,reopen,resume,undo,cancel'],
             'started_on' => ['required_if:action,program,stage', 'nullable', 'date_format:Y-m-d', 'before_or_equal:today'],
-            'effective_on' => ['required_if:action,complete,cancel,resume', 'nullable', 'date_format:Y-m-d', 'before_or_equal:today'],
+            'effective_on' => ['required_if:action,complete,graduate,cancel,resume', 'nullable', 'date_format:Y-m-d', 'before_or_equal:today'],
             'program_id' => ['required_if:action,program', 'nullable', 'integer', 'exists:programs,id'],
-            'mode' => ['required_if:action,program', 'nullable', 'in:whole,staged'],
-            'stage' => ['required_if:action,stage', 'required_if:mode,staged', 'nullable', 'integer', 'between:1,3'],
-            'accounts_settled' => ['exclude_unless:action,program,stage,complete', 'required', 'accepted'],
+            'mode' => ['nullable', 'in:whole,staged'],
+            'stage' => ['required_if:mode,staged', 'nullable', 'integer', 'between:1,3'],
+            'override_program_id' => ['nullable', 'integer', 'min:1', 'exists:programs,id'],
+            'override_reason' => ['required_with:override_program_id', 'nullable', 'string', 'max:1000'],
+            'accounts_settled' => [
+                config('billing.concurrent_stages') && $student->currentEnrollment?->mode === 'staged'
+                    ? 'exclude_unless:action,program,stage' : 'exclude_unless:action,program,stage,complete',
+                'required', 'accepted',
+            ],
             'enrollment_id' => ['required_if:action,correct,reopen,resume,undo,cancel', 'nullable', 'integer'],
             'stage_enrollment_id' => ['sometimes', 'nullable', 'integer'],
             'service_days' => ['required_if:action,correct', 'nullable', 'integer', 'between:1,10000'],
@@ -34,7 +41,8 @@ class EnrollmentController extends Controller
             match ($data['action']) {
                 'program' => Enrollments::start($locked, $data),
                 'stage' => Enrollments::startStage($locked, $data),
-                'complete' => Enrollments::complete($locked, $data['effective_on']),
+                'complete' => Enrollments::complete($locked, $data['effective_on'], $data['stage_enrollment_id'] ?? null),
+                'graduate' => Enrollments::graduate($locked, $data['effective_on']),
                 'correct' => $this->correct($locked, $data),
                 'reopen', 'resume', 'undo', 'cancel' => Enrollments::manage($locked, $data),
             };
@@ -64,8 +72,16 @@ class EnrollmentController extends Controller
         if (! empty($data['ended_on']) && ! $unit->ended_on) {
             Enrollments::error('Use the completion or status action to end an active enrollment/stage.');
         }
+        $concurrentStage = config('billing.concurrent_stages') && $stage;
+        if ($concurrentStage && in_array($stage->status, ['wd', 'sus', 'inactive'], true)
+            && $end !== $stage->ended_on?->format('Y-m-d')) {
+            Enrollments::error('Correct learner-wide closure dates on the learner record, not on one stage.');
+        }
         $siblings = $stage ? $enrollment->stages()->whereKeyNot($stage->id)
             : $student->enrollments()->whereKeyNot($enrollment->id);
+        if ($concurrentStage) {
+            $siblings->where('stage', $stage->stage);
+        }
         if ($siblings->whereDate('started_on', '<', $end ?? '9999-12-31')
             ->where(fn ($query) => $query->whereNull('ended_on')->orWhereDate('ended_on', '>', $start))->exists()) {
             Enrollments::error('The corrected dates overlap another enrollment/stage.');
@@ -76,10 +92,14 @@ class EnrollmentController extends Controller
         }
         $unit->save();
         $firstStage = $stage && $enrollment->stages()->first()->id === $stage->id;
-        if ($firstStage) {
+        $previousProgramStart = $enrollment->started_on->format('Y-m-d');
+        if ($concurrentStage) {
+            $enrollment->started_on = $enrollment->stages()->min('started_on');
+        } elseif ($firstStage) {
             $enrollment->started_on = $start;
         }
-        if ($stage && $enrollment->stages()->reorder('id', 'desc')->first()->id === $stage->id
+        $programStartChanged = $enrollment->started_on->format('Y-m-d') !== $previousProgramStart;
+        if (! $concurrentStage && $stage && $enrollment->stages()->reorder('id', 'desc')->first()->id === $stage->id
             && $enrollment->ended_on
             && $enrollment->ended_on->format('Y-m-d') === substr($before['ended_on'] ?? '', 0, 10)) {
             $enrollment->ended_on = $end;
@@ -113,8 +133,8 @@ class EnrollmentController extends Controller
                     $event->effective_on = $end;
                 }
                 $event->save();
-            } elseif ($firstStage && $event->stage_enrollment_id === null && $event->action === 'started') {
-                $event->effective_on = $start;
+            } elseif (($concurrentStage ? $programStartChanged : $firstStage) && $event->stage_enrollment_id === null && $event->action === 'started') {
+                $event->effective_on = $enrollment->started_on;
                 $event->save();
             }
         }
@@ -125,7 +145,9 @@ class EnrollmentController extends Controller
     public function settings()
     {
         return view('enrollments.settings', [
-            'programs' => Program::whereRaw('LOWER(program) LIKE ?', ['%full%'])->orderBy('id')->get(),
+            'programs' => Program::where(fn ($query) => $query->whereRaw('LOWER(program) LIKE ?', ['%full%'])
+                ->orWhereIn('id', StudentEnrollment::where('mode', 'staged')->where('program_stages', false)->select('program_id')))
+                ->orderBy('id')->get(),
             'definitions' => DB::table('program_stage_definitions')->get()->groupBy('program_id'),
         ]);
     }
@@ -139,7 +161,8 @@ class EnrollmentController extends Controller
         DB::transaction(function () use ($data) {
             foreach ($data['days'] as $programId => $stages) {
                 $program = Program::findOrFail($programId);
-                if (stripos($program->program ?? '', 'full') === false) {
+                if (stripos($program->program ?? '', 'full') === false
+                    && ! StudentEnrollment::where('program_id', $program->id)->where('mode', 'staged')->where('program_stages', false)->exists()) {
                     Enrollments::error('Stage defaults apply only to Full Certificate programs.');
                 }
                 foreach ($stages as $stage => $days) {

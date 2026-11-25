@@ -1,5 +1,6 @@
 <form action="{{ route('reports.expected') }}" method="get">
     <div class="field-grid">
+        @include('reports.program-filter')
         <label>Payment Due Start Date <input type="date" name="startdate" value="{{ $filters['startdate'] ?? '' }}"></label>
         <label>End Date (exclusive) <input type="date" name="enddate" value="{{ $filters['enddate'] ?? '' }}"></label>
     </div>

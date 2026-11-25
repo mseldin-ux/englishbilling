@@ -1,7 +1,7 @@
 <details>
     <summary>Edit {{ $stageId ? 'stage' : 'program' }} / resume / undo closure / cancel</summary>
     @foreach(['correct' => 'Save changes', 'resume' => 'Resume study', 'undo' => 'Undo closure', 'cancel' => 'Cancel (retain billing)'] as $action => $button)
-        @if(in_array($action, ['resume', 'undo'], true) && (!$unit->ended_on || $student->current_enrollment_id !== $enrollment->id || ($stageId && $enrollment->stages->last()->id !== $stageId))) @continue @endif
+        @if(in_array($action, ['resume', 'undo'], true) && (!$unit->ended_on || $student->current_enrollment_id !== $enrollment->id || ($stageId && !config('billing.concurrent_stages') && $enrollment->stages->last()->id !== $stageId))) @continue @endif
         @if($action === 'cancel' && $unit->status === 'cancelled') @continue @endif
         <form method="post" action="{{ route('enrollments.store', $student) }}" data-dirty
             @if($action !== 'correct') data-confirm="{{ match ($action) {

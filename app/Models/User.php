@@ -46,6 +46,11 @@ class User extends Authenticatable
         return $this->is_admin || $this->access_level === 'staff';
     }
 
+    public function canManageHistoricalTransactions(): bool
+    {
+        return $this->is_admin || $this->access_level === 'staff';
+    }
+
     public function level(): string
     {
         return $this->is_admin ? 'admin' : $this->access_level;

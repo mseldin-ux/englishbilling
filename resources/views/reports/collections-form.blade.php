@@ -1,5 +1,6 @@
 <form action="{{ route('reports.collections') }}" method="get">
     <div class="field-grid">
+        @include('reports.program-filter')
         <label>Minimum Next Payment Due <input type="number" step="0.01" name="collectionsmin" value="{{ $filters['collectionsmin'] ?? '' }}"></label>
         <label>Maximum Next Payment Due <input type="number" step="0.01" name="collectionsmax" value="{{ $filters['collectionsmax'] ?? '' }}"></label>
         <label>Next Payment Due Before <input type="date" name="next_due_date" value="{{ $filters['next_due_date'] ?? '' }}"></label>

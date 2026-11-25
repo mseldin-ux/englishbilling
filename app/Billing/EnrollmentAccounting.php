@@ -12,6 +12,7 @@ use Brick\Math\BigRational;
 use Carbon\CarbonImmutable;
 use Closure;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 
 final class EnrollmentAccounting
 {
@@ -36,7 +37,8 @@ final class EnrollmentAccounting
             return BigRational::of(0);
         }
         foreach ($enrollment->events as $event) {
-            if (! $event->voided_at && ($event->stage_enrollment_id === null || (string) $event->stage_enrollment_id === (string) $stage?->id)
+            if (! $event->voided_at && ! ($event->details['learner_only'] ?? false)
+                && ($event->stage_enrollment_id === null || (string) $event->stage_enrollment_id === (string) $stage?->id)
                 && in_array($event->action, ['completed', 'graduated', 'wd', 'sus', 'inactive', 'onextension'], true)
                 && $event->effective_on->format('Y-m-d') <= $asOf->toDateString()) {
                 return BigRational::of(1);
@@ -66,18 +68,19 @@ final class EnrollmentAccounting
             $intervals[] = [$closed, $asOf->getTimestamp()];
         }
         foreach ($student->loas as $loa) {
-            if ($loa->enrollment_id !== null && (string) $loa->enrollment_id !== (string) $enrollment->id) {
-                continue;
-            }
-            if ($loa->stage_enrollment_id !== null && (string) $loa->stage_enrollment_id !== (string) $stage?->id) {
-                continue;
-            }
             if (! $loa->loa_start) {
                 continue;
             }
-            $begin = max($start->getTimestamp(), CarbonImmutable::parse($loa->getRawOriginal('loa_start'), 'UTC')->getTimestamp());
-            $end = min($asOf->getTimestamp(), $loa->loa_end
-                ? CarbonImmutable::parse($loa->getRawOriginal('loa_end'), 'UTC')->getTimestamp() : $asOf->getTimestamp());
+            $leaveStart = CarbonImmutable::parse($loa->getRawOriginal('loa_start'), 'UTC');
+            if ($leaveStart >= $asOf) {
+                continue;
+            }
+            $leaveEnd = $loa->loa_end ? CarbonImmutable::parse($loa->getRawOriginal('loa_end'), 'UTC') : $asOf;
+            if ($leaveEnd < $leaveStart) {
+                LeavePeriods::invalidDates($student, $loa);
+            }
+            $begin = max($start->getTimestamp(), $leaveStart->getTimestamp());
+            $end = min($asOf->getTimestamp(), $leaveEnd->getTimestamp());
             if ($end > $begin) {
                 $intervals[] = [$begin, $end];
             }
@@ -97,15 +100,30 @@ final class EnrollmentAccounting
     public static function statusAt(StudentEnrollment $enrollment, string $date): string
     {
         $status = 'active';
+        $activeStages = [];
         foreach ($enrollment->events->whereNull('voided_at')->sortBy([
             ['effective_on', 'asc'], ['id', 'asc'],
         ]) as $event) {
             if ($event->effective_on->format('Y-m-d') > $date) {
                 continue;
             }
+            if ($event->stage_enrollment_id !== null) {
+                if (in_array($event->action, ['started', 'resumed'], true)) {
+                    $activeStages[$event->stage_enrollment_id] = true;
+                } elseif (in_array($event->action, ['completed', 'graduated', 'wd', 'sus', 'inactive', 'cancelled'], true)) {
+                    unset($activeStages[$event->stage_enrollment_id]);
+                }
+            }
             if ($event->action === 'completed') {
                 $stage = $enrollment->stages->firstWhere('id', $event->stage_enrollment_id);
-                $status = ! $stage || $stage->stage === 3 ? 'graduated' : 'between_stages';
+                $status = ($event->details['independent_stage'] ?? false)
+                    ? ($activeStages ? 'active' : 'between_stages')
+                    : (! $stage || $stage->isFinal() ? 'graduated' : 'between_stages');
+            } elseif ($event->action === 'cancelled' && ($event->details['independent_stage'] ?? false)) {
+                $status = $activeStages ? 'active' : 'between_stages';
+            } elseif ($event->action === 'status_cleared' && ($event->details['independent_stage'] ?? false)
+                && ($event->details['cleared_status'] ?? null) !== 'onextension') {
+                $status = $activeStages ? 'active' : 'between_stages';
             } elseif (in_array($event->action, ['graduated', 'wd', 'sus', 'inactive', 'cancelled'], true)) {
                 $status = $event->action;
             } elseif (in_array($event->action, ['started', 'resumed'], true)) {
@@ -124,6 +142,9 @@ final class EnrollmentAccounting
         }
         $snapshot = new Student;
         $snapshot->setRawAttributes($context['student'], true);
+        $snapshot->setRelation('reportStatusDates', collect([
+            'current' => LegacyReportDates::forSnapshot($student, $enrollment->id),
+        ]));
         $program = null;
         if ($context['program']) {
             $program = new Program;
@@ -175,9 +196,63 @@ final class EnrollmentAccounting
         return $earned;
     }
 
+    public static function expandAllocations(iterable $transactions): array
+    {
+        $transactions = collect($transactions)->all();
+        if (! config('billing.concurrent_stages') || ! $transactions) {
+            return $transactions;
+        }
+        $allocations = [];
+        foreach (array_chunk(array_map(fn ($transaction) => $transaction->id, $transactions), 300) as $ids) {
+            $rows = DB::table('transaction_stage_allocations as allocation')
+                ->join('student_stage_enrollments as stage', 'stage.id', '=', 'allocation.stage_enrollment_id')
+                ->join('student_enrollments as enrollment', 'enrollment.id', '=', 'stage.enrollment_id')
+                ->whereIn('allocation.transaction_id', $ids)
+                ->select('allocation.transaction_id', 'allocation.stage_enrollment_id', 'allocation.amount',
+                    'stage.enrollment_id', 'enrollment.student_id')->get();
+            foreach ($rows as $row) {
+                $allocations[$row->transaction_id][] = $row;
+            }
+        }
+        $expanded = [];
+        foreach ($transactions as $transaction) {
+            $parts = $allocations[$transaction->id] ?? [];
+            if (! $parts) {
+                $expanded[] = $transaction;
+
+                continue;
+            }
+            if ($transaction->transactionamount === null) {
+                Enrollments::error("Transaction {$transaction->id} has allocations but no amount.");
+            }
+            $total = BigDecimal::zero();
+            $amount = BigDecimal::of((string) $transaction->transactionamount);
+            foreach ($parts as $part) {
+                if ((string) $part->student_id !== (string) $transaction->student_id
+                    || (string) $part->enrollment_id !== (string) $transaction->enrollment_id) {
+                    Enrollments::error("Transaction {$transaction->id} has an allocation outside its enrollment.");
+                }
+                $value = BigDecimal::of((string) $part->amount);
+                if ($value->isNegative()) {
+                    Enrollments::error("Transaction {$transaction->id} has a negative allocation.");
+                }
+                $total = $total->plus($value);
+                $copy = clone $transaction;
+                $copy->stage_enrollment_id = $part->stage_enrollment_id;
+                $copy->transactionamount = (string) ($amount->isNegative() ? $value->negated() : $value);
+                $expanded[] = $copy;
+            }
+            if (! $total->isEqualTo($amount->abs())) {
+                Enrollments::error("Transaction {$transaction->id} allocations do not match its amount.");
+            }
+        }
+
+        return $expanded;
+    }
+
     public static function reportStudents(array $filters): Builder
     {
-        return Student::query()->where(function (Builder $query) use ($filters) {
+        return Student::query()->where('hasenrolled', true)->where(function (Builder $query) use ($filters) {
             $query->where(function (Builder $legacy) use ($filters) {
                 $legacy->whereNull('current_enrollment_id')->where('start_date', '>=', $filters['startdate'])
                     ->where('start_date', '<', $filters['lastpossiblestartdate'])

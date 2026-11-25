@@ -25,11 +25,18 @@ final class ProgramProgress
         }
         $start ??= $grad->subYearsNoOverflow(3);
         $grad ??= $start->addYearsNoOverflow(3);
-        $force = $student->archived && $start < CarbonImmutable::parse('2022-01-01', 'UTC');
+        $inactive = $student->getRawOriginal('inactive_date');
+        if ($student->inactive && $inactive === null) {
+            $inactive = LegacyReportDates::forStudent($student);
+        }
+        $inactiveDate = self::date($inactive);
+        $force = $student->archived && $start < CarbonImmutable::parse('2022-01-01', 'UTC')
+            && (! $student->inactive || $inactiveDate === null || $inactiveDate <= $asOf);
         $lastDates = [$grad];
         foreach (['wd' => 'wd_date', 'inactive' => 'inactive_date', 'onextension' => 'extension_start_date',
             'sus' => 'sus_date', 'graduated' => 'actualdategrad'] as $flag => $field) {
-            $event = self::date($student->getRawOriginal($field));
+            $raw = $flag === 'inactive' ? $inactive : $student->getRawOriginal($field);
+            $event = self::date($raw);
             if ($student->$flag && $event !== null) {
                 $lastDates[] = $event;
                 if ($flag !== 'sus' && $event <= $asOf) {
@@ -37,26 +44,11 @@ final class ProgramProgress
                 }
             }
         }
-        if ($student->graduated && $student->graddate !== null && $grad <= $asOf) {
+        if ($student->graduated && $student->actualdategrad === null && $student->graddate !== null && $grad <= $asOf) {
             $force = true;
         }
         $last = min($lastDates);
-        $loaSeconds = 0;
-        $loas = $student->loas->sortBy('id')->values();
-        foreach ($loas as $index => $loa) {
-            $begin = self::date($loa->getRawOriginal('loa_start'));
-            $end = self::date($loa->getRawOriginal('loa_end'));
-            if ($begin === null || $begin >= $asOf) {
-                continue;
-            }
-            // Preserve the legacy last-row clipping rule; do not silently merge overlapping LOAs.
-            if (($end === null || $end > $asOf) && $index === $loas->count() - 1) {
-                $end = $asOf;
-            }
-            if ($end !== null) {
-                $loaSeconds += max(0, $end->getTimestamp() - $begin->getTimestamp());
-            }
-        }
+        $loaSeconds = LeavePeriods::seconds($student, $asOf);
         $days = $student->program?->servicedays ?? 547;
         if ($days <= 0) {
             throw ValidationException::withMessages(['program' => "Learner {$student->id} has a program with non-positive service days. Correct it before reporting."]);

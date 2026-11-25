@@ -128,7 +128,7 @@ class RecordsWorkspaceTest extends TestCase
         $this->assertStringNotContainsString('900.00', $text);
         $rows = array_filter(explode("\r\n", $text));
         $this->assertCount(44, $rows);
-        $this->assertCount(26, str_getcsv($rows[0], "\t", '"', ''));
+        $this->assertCount(27, str_getcsv($rows[0], "\t", '"', ''));
         $selected = $this->get('/records/export?ids[]='.$this->student->id)->assertOk()->streamedContent();
         $this->assertStringContainsString('Visible', $selected);
         $this->assertStringNotContainsString('Other', $selected);

@@ -6,34 +6,42 @@ use Brick\Math\BigDecimal;
 use Brick\Math\BigRational;
 use Brick\Math\RoundingMode;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 final class EarnedIncome
 {
     public const FIELDS = ['id', 'first_name', 'last_name', 'archived', 'cohort', 'currentservicetime',
         'extension_start_date', 'graduated', 'graddate', 'actualdategrad', 'inactive', 'inactive_date',
         'lastdate', 'lengthofprogram', 'loalength', 'onextension', 'pif', 'pifdate', 'program_id',
-        'start_date', 'sus', 'sus_date', 'totaltimeinprogram', 'wd', 'wd_date', 'invoiced', 'pct', 'earned', 'unearned'];
+        'start_date', 'sus', 'sus_date', 'totaltimeinprogram', 'wd', 'wd_date', 'invoiced', 'pct', 'earned', 'unearned', 'program'];
 
     public static function run(array $filters): array
     {
         return DB::transaction(function () use ($filters) {
-            $students = EnrollmentAccounting::reportStudents($filters)
-                ->with(['program', 'loas'])->orderBy('id')->get();
+            $query = EnrollmentAccounting::reportStudents($filters)->with(['program', 'loas'])->orderBy('id');
+            ReportPrograms::filter($query->getQuery(), 'students.id', 'earned', $filters);
+            $students = $query->get();
+            LegacyReportDates::load($students);
+            $programs = ReportPrograms::labels($students->modelKeys(), 'earned', $filters);
             $students->filter(fn ($student) => $student->current_enrollment_id)->load('enrollments.stages', 'enrollments.events');
             $fees = $transactions = [];
             foreach (array_chunk($students->modelKeys(), 300) as $ids) {
                 $query = DB::table('studenttransactions')->whereIn('student_id', $ids)
                     ->whereIn(DB::raw('LOWER(transactiontype)'), ['fee', 'declined fee'])
-                    ->whereNotNull('transactionamount')->select('student_id', 'transactionamount', 'transactiontype',
-                        'enrollment_id', 'stage_enrollment_id', 'recognition')->orderBy('id')
+                    ->whereNotNull('transactionamount')->select('id', 'student_id', 'transactionamount', 'transactiontype',
+                        'processeddate', 'enrollment_id', 'stage_enrollment_id', 'recognition')->orderBy('id')
                     ->where(function ($query) use ($filters) {
-                        $query->whereNull('enrollment_id')
-                            ->orWhereIn('enrollment_id', DB::table('student_enrollments')->where('mode', 'legacy')->select('id'))
-                            ->orWhere('transactiondate', '<', $filters['dateasof']);
+                        $query->whereNull('processeddate')->orWhere('processeddate', '<', $filters['dateasof']);
                     });
-                foreach ($query->cursor() as $transaction) {
+                $batch = $query->get();
+                foreach ($batch as $transaction) {
+                    if ($transaction->processeddate === null) {
+                        throw ValidationException::withMessages(['report' => "Fee transaction {$transaction->id} has no Our Date. Correct it before generating Earned Income."]);
+                    }
                     $amount = (string) BigDecimal::of((string) $transaction->transactionamount)->abs()->toScale(2);
                     $fees[$transaction->student_id] = Money::add($fees[$transaction->student_id] ?? '0.00', $amount);
+                }
+                foreach (EnrollmentAccounting::expandAllocations($batch) as $transaction) {
                     $transactions[$transaction->student_id][] = $transaction;
                 }
             }
@@ -67,6 +75,7 @@ final class EarnedIncome
                 $row['invoiced'] = $invoiced;
                 $row['earned'] = (string) $earned->toScale(6, RoundingMode::HalfUp);
                 $row['unearned'] = (string) $unearned->toScale(6, RoundingMode::HalfUp);
+                $row['program'] = $programs[$student->id] ?? 'No program recorded for period';
                 $rows[] = $row;
             }
             $sort = match ($filters['sort'] ?? '') {

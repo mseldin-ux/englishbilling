@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Billing\BillingRules;
 use App\Billing\EditLocks;
 use App\Billing\EnrollmentAttribution;
+use App\Billing\Enrollments;
 use App\Billing\Ledger;
 use App\Billing\RecordVersion;
 use App\Billing\StudentEdits;
@@ -14,6 +15,7 @@ use App\Models\Program;
 use App\Models\Student;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class StudentController extends Controller
@@ -40,7 +42,7 @@ class StudentController extends Controller
 
     public function create()
     {
-        return view('students.form', ['student' => new Student, 'groups' => StudentFields::GROUPS,
+        return view('students.form', ['student' => (new Student)->forceFill(['hasenrolled' => true]), 'groups' => StudentFields::GROUPS,
             'accessStatuses' => DB::table('student_access_statuses')->orderBy('id')->get(),
             'programs' => Program::orderBy('id')->get()]);
     }
@@ -48,11 +50,16 @@ class StudentController extends Controller
     public function store(Request $request)
     {
         $data = $request->validate(StudentFields::rules());
+        $data['hasenrolled'] ??= true;
+        if (! $data['hasenrolled'] && ! empty($data['graduated'])) {
+            throw ValidationException::withMessages(['graduated' => 'A learner must be enrolled before being marked graduated.']);
+        }
         $student = DB::transaction(function () use ($data) {
             $student = new Student;
             $student->forceFill($data);
             $student->balance = '0.00';
             $student->save();
+            Enrollments::initialize($student);
 
             return $student;
         });
@@ -71,24 +78,48 @@ class StudentController extends Controller
             ?? (clone $query)->orderBy('id')->value('id');
         $position = (clone $query)->where('id', '<', $student->id)->count();
         $transactions = $student->transactions()->orderBy('transactiondate')->orderBy('id')->get();
+        $allocations = config('billing.concurrent_stages')
+            ? DB::table('transaction_stage_allocations')->whereIn('transaction_id', $transactions->modelKeys())
+                ->get()->groupBy('transaction_id') : collect();
         $summary = Ledger::summary($transactions);
         $plannedQuery = $student->anticipatedPayments()->whereDate('paymentduedate', '>=', today());
         $invoicesQuery = $student->invoices();
-        if ($student->current_enrollment_id) {
+        $concurrentStages = config('billing.concurrent_stages') && $student->currentEnrollment?->mode === 'staged';
+        if ($concurrentStages) {
+            $plannedQuery->where('enrollment_id', $student->current_enrollment_id);
+            $invoicesQuery->where('enrollment_id', $student->current_enrollment_id);
+        } elseif ($student->current_enrollment_id) {
             foreach (EnrollmentAttribution::current($student) as $field => $value) {
                 $plannedQuery->where($field, $value);
                 $invoicesQuery->where($field, $value);
             }
         }
-        $planned = $plannedQuery->orderBy('paymentduedate')->first();
-        $plannedInvoiceExists = $planned && $invoicesQuery->whereDate('nextdate', $planned->paymentduedate)->exists();
+        $payments = $concurrentStages
+            ? $plannedQuery->orderBy('paymentduedate')->orderBy('id')->get()->unique('stage_enrollment_id')
+            : collect(array_filter([$plannedQuery->orderBy('paymentduedate')->first()]));
+        $plannedItems = $payments->map(function ($planned) use ($concurrentStages, $invoicesQuery) {
+            $matching = clone $invoicesQuery;
+            if ($concurrentStages) {
+                $matching->where(function ($query) use ($planned) {
+                    $query->where(function ($single) use ($planned) {
+                        $single->where('stage_enrollment_id', $planned->stage_enrollment_id)
+                            ->whereNotExists(fn ($q) => $q->selectRaw('1')->from('invoice_stage_allocations as allocation')
+                                ->whereColumn('allocation.invoice_id', 'invoices.id'));
+                    })->orWhereExists(fn ($q) => $q->selectRaw('1')->from('invoice_stage_allocations as allocation')
+                        ->whereColumn('allocation.invoice_id', 'invoices.id')
+                        ->where('allocation.stage_enrollment_id', $planned->stage_enrollment_id));
+                });
+            }
+
+            return ['payment' => $planned, 'invoiceExists' => $matching->whereDate('nextdate', $planned->paymentduedate)->exists()];
+        });
 
         return view('students.show', ['student' => $student, 'groups' => StudentFields::GROUPS,
             'accessStatuses' => DB::table('student_access_statuses')->orderBy('id')->get(),
             'programs' => Program::orderBy('id')->get(), 'previous' => $previous, 'next' => $next,
             'listPage' => intdiv($position, 40) + 1, 'transactions' => $transactions,
-            'summary' => $summary, 'types' => BillingRules::TYPES, 'planned' => $planned,
-            'plannedInvoiceExists' => $plannedInvoiceExists, 'editLock' => $editLock]);
+            'summary' => $summary, 'types' => BillingRules::TYPES, 'allocations' => $allocations,
+            'plannedItems' => $plannedItems, 'editLock' => $editLock]);
     }
 
     public function update(Request $request, Student $student)
@@ -96,7 +127,7 @@ class StudentController extends Controller
         $data = $request->validate(['version' => ['required', 'string'], ...StudentFields::rules()]);
         $version = $data['version'];
         unset($data['version']);
-        $updated = StudentEdits::update($student, $data, $version);
+        $updated = StudentEdits::update($student, $data, $version, validateDetail: true);
 
         return $request->expectsJson()
             ? response()->json(['message' => 'All changes saved.', 'version' => RecordVersion::of($updated),

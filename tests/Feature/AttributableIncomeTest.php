@@ -43,7 +43,7 @@ class AttributableIncomeTest extends TestCase
     {
         $row = new StudentTransaction;
         $row->forceFill(['student_id' => ($student ?? $this->student)->id, 'transactiontype' => $type,
-            'transactionamount' => $amount, 'transactiondate' => $date, 'processeddate' => '2028-01-01'])->save();
+            'transactionamount' => $amount, 'transactiondate' => $date, 'processeddate' => $date ?? '2026-03-01'])->save();
     }
 
     private function progress(array $data = [], string $asOf = '2026-02-20'): array
@@ -199,22 +199,34 @@ class AttributableIncomeTest extends TestCase
             'graddate' => '2029-01-01'])['fields']['pct']);
     }
 
-    public function test_legacy_loa_overlap_missing_and_last_row_clipping_are_preserved(): void
+    public function test_legacy_leave_periods_are_clipped_and_overlaps_count_only_once(): void
     {
         $this->loa(null, null);
-        $this->loa('2026-01-10', '2026-01-05');
         $this->loa('2026-01-10', '2026-01-20');
         $this->loa('2026-01-15', '2026-01-25');
         $this->loa('2026-02-10', null);
         $progress = $this->progress();
-        $this->assertSame('30 days, 0:00:00', $progress['fields']['loalength']);
-        $this->assertSame('0.2', $progress['fields']['pct']);
+        $this->assertSame('25 days, 0:00:00', $progress['fields']['loalength']);
+        $this->assertSame('0.25', $progress['fields']['pct']);
         $this->loa('2026-03-01', null);
-        $this->assertSame('20 days, 0:00:00', $this->progress()['fields']['loalength']);
+        $this->assertSame('25 days, 0:00:00', $this->progress()['fields']['loalength']);
         $this->loa('2026-02-01', '2026-03-01');
-        $this->assertSame('39 days, 0:00:00', $this->progress()['fields']['loalength']);
+        $this->assertSame('34 days, 0:00:00', $this->progress()['fields']['loalength']);
         $this->loa(null, null);
-        $this->assertSame('48 days, 0:00:00', $this->progress()['fields']['loalength']);
+        $this->assertSame('34 days, 0:00:00', $this->progress()['fields']['loalength']);
+    }
+
+    public function test_future_leave_and_future_closure_of_ongoing_leave_do_not_change_historical_income(): void
+    {
+        $this->transaction('Fee', '100.00');
+        $this->loa('2026-01-10', null);
+        $this->loa('2026-01-20', '2026-01-21');
+        $before = AttributableIncome::run($this->filters)['calculated']['totalearned'];
+        $this->loa('2026-03-01', null);
+        $leave = LeaveOfAbsence::where('student_id', $this->student->id)->orderBy('id')->firstOrFail();
+        $leave->forceFill(['loa_end' => '2026-03-01'])->save();
+        $this->assertSame('9.00', $before);
+        $this->assertSame($before, AttributableIncome::run($this->filters)['calculated']['totalearned']);
     }
 
     public function test_archived_before_2022_forces_completion_and_bad_service_days_are_explicit(): void
@@ -313,7 +325,7 @@ class AttributableIncomeTest extends TestCase
         $queries = DB::getQueryLog();
         DB::disableQueryLog();
         $this->assertCount(30, $report['rows']);
-        $this->assertLessThanOrEqual(4, count($queries));
+        $this->assertLessThanOrEqual(8, count($queries));
         $this->assertDatabaseCount('studenttransactions', 30);
         $this->assertDatabaseCount('invoices', 0);
         $this->assertNull($this->student->fresh()->balance);

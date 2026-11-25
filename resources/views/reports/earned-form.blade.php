@@ -1,8 +1,9 @@
 <form action="{{ route('reports.earned') }}" method="get">
     <div class="field-grid">
+        @include('reports.program-filter')
         <label>Enrolled On or After <input type="date" name="startdate" value="{{ $filters['startdate'] ?? '' }}" required></label>
         <label>Enrolled Before (exclusive) <input type="date" name="lastpossiblestartdate" value="{{ $filters['lastpossiblestartdate'] ?? '' }}" required></label>
-        <label>Earned As Of (midnight) <input type="date" name="dateasof" value="{{ $filters['dateasof'] ?? '' }}" required></label>
+        <label>Earned As Of (midnight, exclusive) <input type="date" name="dateasof" value="{{ $filters['dateasof'] ?? '' }}" required></label>
         <label>Sort By <select name="sort">
             @foreach(['' => 'Unsorted (ID order)', 'ID' => 'ID', 'Last Name' => 'Last Name', 'Graduation Date' => 'Graduation Date'] as $value => $label)
                 <option value="{{ $value }}" @selected(($filters['sort'] ?? '') === $value)>{{ $label }}</option>

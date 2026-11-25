@@ -11,6 +11,7 @@ use App\Http\Controllers\FinalGradesController;
 use App\Http\Controllers\FormsController;
 use App\Http\Controllers\LockController;
 use App\Http\Controllers\PaymentPlanController;
+use App\Http\Controllers\ProgramController;
 use App\Http\Controllers\RecordsController;
 use App\Http\Controllers\ReportController;
 use App\Http\Controllers\SessionController;
@@ -55,6 +56,7 @@ Route::middleware(['auth', 'user-access', 'staff-session'])->group(function () {
     Route::post('/logout', [SessionController::class, 'destroy'])->name('logout');
     Route::get('/utilities', [UtilitiesController::class, 'index'])->middleware('admin')->name('utilities.index');
     Route::post('/utilities/mail', [UtilitiesController::class, 'testMail'])->middleware(['admin', 'throttle:6,1'])->name('utilities.mail');
+    Route::resource('admin/programs', ProgramController::class)->except(['show', 'destroy'])->middleware('admin');
     Route::get('/records', [RecordsController::class, 'index'])->name('workspace.index');
     Route::get('/records/export', [RecordsController::class, 'export'])->name('workspace.export');
     Route::get('/records/locks', [RecordsController::class, 'tableLocks'])->name('workspace.table-locks');

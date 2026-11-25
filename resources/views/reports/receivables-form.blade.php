@@ -1,5 +1,6 @@
 <form action="{{ route('reports.receivables') }}" method="get">
     <div class="field-grid">
+        @include('reports.program-filter')
         <label>Enrolled On or After <input type="date" name="startdate" value="{{ $filters['startdate'] ?? '' }}"></label>
         <label>Receivable As Of (exclusive) <input type="date" name="enddate" value="{{ $filters['enddate'] ?? '' }}"></label>
         <label class="inline"><input type="checkbox" name="zeros" value="hidezero" @checked(($filters['zeros'] ?? '') === 'hidezero')> Hide Zero / Negative Rows (legacy)</label>

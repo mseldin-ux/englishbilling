@@ -6,6 +6,7 @@ use App\Billing\RecordVersion;
 use App\Models\Invoice;
 use App\Models\LeaveOfAbsence;
 use App\Models\PaymentPlan;
+use App\Models\Program;
 use App\Models\Student;
 use App\Models\StudentTransaction;
 use App\Models\User;
@@ -22,8 +23,11 @@ class BillingWorkflowTest extends TestCase
     {
         parent::setUp();
         $this->actingAs(User::factory()->create(['username' => 'staff']));
+        $program = new Program;
+        $program->forceFill(['program' => 'Example'])->save();
         $this->student = new Student;
         $this->student->forceFill(['first_name' => 'Test', 'last_name' => 'Learner',
+            'program_id' => $program->id, 'graddate' => '2027-01-01',
             'balance' => '0.00', 'inactive' => false, 'loa' => false,
             'wd' => false, 'sus' => false, 'graduated' => false, 'pif' => false,
             'archived' => false, 'start_date' => '2026-01-31 00:00:00'])->save();
@@ -42,6 +46,35 @@ class BillingWorkflowTest extends TestCase
     {
         return ['transactiondate' => '2026-11-01', 'processeddate' => '2026-11-02',
             'transactiontype' => 'Fee', 'transactionamount' => '100.10', 'transactionnotes' => 'Base Tuition'];
+    }
+
+    public function test_our_date_is_required_for_new_transactions_and_cannot_be_cleared(): void
+    {
+        $url = "/students/{$this->student->id}/transactions";
+        $data = $this->transactionData();
+        unset($data['processeddate']);
+        $this->postJson($url, $data)->assertUnprocessable()->assertJsonValidationErrors('processeddate');
+        $this->postJson($url, [...$data, 'processeddate' => null])->assertUnprocessable()->assertJsonValidationErrors('processeddate');
+        $this->postJson($url, $this->transactionData())->assertOk();
+        $transaction = StudentTransaction::firstOrFail();
+        $this->patchJson($url.'/'.$transaction->id, ['version' => RecordVersion::of($transaction), 'processeddate' => null])
+            ->assertUnprocessable()->assertJsonValidationErrors('processeddate');
+        $this->get($url)->assertOk()->assertSee('name="processeddate"', false);
+    }
+
+    public function test_leave_creation_and_changes_cannot_overlap_another_leave(): void
+    {
+        $url = "/students/{$this->student->id}/loas";
+        $this->postJson($url, ['loa_start' => '2026-04-01', 'loa_end' => '2026-04-10'])->assertOk();
+        $this->postJson($url, ['loa_start' => '2026-04-09', 'loa_end' => '2026-04-12'])
+            ->assertUnprocessable()->assertJsonValidationErrors('loa_start');
+        $this->postJson($url, ['loa_start' => '2026-04-10', 'loa_end' => null])->assertOk();
+        $second = LeaveOfAbsence::orderBy('id', 'desc')->firstOrFail();
+        $this->patchJson($url.'/'.$second->id, ['version' => RecordVersion::of($second->fresh()), 'loa_start' => '2026-04-09'])
+            ->assertUnprocessable()->assertJsonValidationErrors('loa_start');
+        $this->postJson($url, ['loa_start' => '2026-05-01', 'loa_end' => null])
+            ->assertUnprocessable()->assertJsonValidationErrors('loa_start');
+        $this->assertDatabaseCount('loas', 2);
     }
 
     public function test_staff_can_view_browse_detail_creation_and_all_sections(): void
@@ -218,10 +251,13 @@ class BillingWorkflowTest extends TestCase
         $legacy = $this->record(LeaveOfAbsence::class, ['loa_start' => '2026-04-01', 'loa_end' => '2026-03-01']);
         $this->get($url)->assertOk();
         $this->patchJson($url.'/'.$legacy->id, [
-            'version' => RecordVersion::of($legacy), 'loa_end' => null,
+            'version' => RecordVersion::of($legacy->fresh()), 'loa_end' => null,
+        ])->assertUnprocessable()->assertJsonValidationErrors('loa_start');
+        $this->deleteJson($url.'/'.$loa->id, ['version' => RecordVersion::of($loa)])->assertOk();
+        $this->patchJson($url.'/'.$legacy->id, [
+            'version' => RecordVersion::of($legacy->fresh()), 'loa_end' => null,
         ])->assertOk();
         $this->assertNull($legacy->fresh()->loa_end);
-        $this->deleteJson($url.'/'.$loa->id, ['version' => RecordVersion::of($loa)])->assertOk();
     }
 
     public function test_recalculation_requires_confirmation_and_staff_can_run_it(): void

@@ -116,7 +116,7 @@ class FormsController extends Controller
     public function learners(Request $request)
     {
         $term = trim($request->validate(['q' => ['required', 'string', 'max:100']])['q']);
-        $query = Student::query()->with('enrollments.program')->select(['id', 'first_name', 'middle_name', 'last_name', 'cohort', 'program_id', 'current_enrollment_id']);
+        $query = Student::query()->with('enrollments.program', 'currentEnrollment')->select(['id', 'first_name', 'middle_name', 'last_name', 'cohort', 'program_id', 'current_enrollment_id']);
         $query->where(function ($query) use ($term) {
             if (ctype_digit($term)) {
                 $query->orWhere('id', (int) $term);
@@ -125,7 +125,7 @@ class FormsController extends Controller
         });
         $learners = $query->orderBy('last_name')->orderBy('first_name')->orderBy('id')->limit(25)->get()
             ->map(fn (Student $student) => ['id' => $student->id, 'name' => $student->displayName() ?: 'Unnamed learner',
-                'cohort' => $student->cohort, 'program_id' => $student->program_id,
+                'cohort' => $student->cohort, 'program_id' => $student->academicProgramId(),
                 'enrollments' => \App\Forms\ProgramEnrollment::options($student)]);
 
         return response()->json(['learners' => $learners])->header('Cache-Control', 'private, no-store');
@@ -137,7 +137,7 @@ class FormsController extends Controller
         $values = array_fill_keys(array_keys(GraduationInitiation::LABELS), null);
         if ($student) {
             $values['student_id'] = $student->id;
-            $values['program_id'] = GraduationInitiation::programs()->contains('id', $student->program_id) ? $student->program_id : null;
+            $values['program_id'] = GraduationInitiation::programs()->contains('id', $student->academicProgramId()) ? $student->academicProgramId() : null;
             $values['enrollment_id'] = \App\Forms\ProgramEnrollment::current($student, $values['program_id']);
         }
 

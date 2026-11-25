@@ -1,9 +1,22 @@
 @include('students.lock-notice')
-<div class="schedule-editor" data-fees="{{ $fees }}">
+@if($stageChoices)
+    <label>Payment plan stage
+        <select data-schedule-stage>
+            <option value="">Choose a stage</option>
+            @foreach($stageChoices as $value => $label)
+                <option value="{{ $value }}" @selected($selectedPeriod === $value)>{{ $label }}</option>
+            @endforeach
+        </select>
+    </label>
+    <button type="button" data-select-schedule>Open stage plan</button>
+@endif
+@if(!$stageChoices || $selectedPeriod)
+<div class="schedule-editor" data-fees="{{ $fees }}" @if($stageChoices) data-stage-specific @endif>
 @if($student->current_enrollment_id)<p>This schedule and its fee total apply only to the current program/stage. Prior schedules are retained in the database.</p>@endif
 <p>TOTAL FEES: {{ $fees }} | <span class="remaining-amount"></span></p>
 <form id="schedule-generator" method="post" action="{{ route('schedule.generate', $student) }}">
     @csrf
+    @if($selectedPeriod)<input type="hidden" name="billing_period" value="{{ $selectedPeriod }}">@endif
     <label>Payment Plan Template
         <select name="template_id" required>
             @foreach($templates as $template)<option value="{{ $template->id }}">{{ $template->paymentplan }} — {{ $template->paymentplandesc }}</option>@endforeach
@@ -18,8 +31,9 @@
 <form id="schedule-form" method="post" action="{{ route('schedule.save', $student) }}" data-dirty>
     @csrf @method('PUT')
     <input type="hidden" name="version" value="{{ $version }}">
+    @if($selectedPeriod)<input type="hidden" name="billing_period" value="{{ $selectedPeriod }}">@endif
     @if($student->current_enrollment_id)
-        <p>Program / Stage: {{ \App\Billing\EnrollmentAttribution::options($student)[implode(':', \App\Billing\EnrollmentAttribution::current($student))] }}</p>
+        <p>Program / Stage: {{ $selectedPeriod ? $stageChoices[$selectedPeriod] : \App\Billing\EnrollmentAttribution::options($student)[implode(':', \App\Billing\EnrollmentAttribution::current($student))] }}</p>
     @endif
     <label>Description <textarea name="paymentplandesc" rows="2">{{ $plan?->paymentplandesc }}</textarea></label>
     <div class="table-scroll">
@@ -53,3 +67,4 @@
 </template>
 <p class="hint">Saving replaces this learner's schedule atomically, in the displayed row order, as in Django. Scheduled-payment IDs are regenerated; non-edited invoice-date and percentage values are retained.</p>
 </div>
+@endif

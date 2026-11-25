@@ -44,7 +44,7 @@ class RecordsSearchTest extends TestCase
         $this->assertCount(3, $response->viewData('filters'));
         $text = $this->get($this->url($filters, '/records/export'))->assertOk()->streamedContent();
         $this->assertStringContainsString('User ID', $text);
-        $this->assertStringContainsString("101\tAlpha", $text);
+        $this->assertStringContainsString("101\t1\tAlpha", $text);
         $this->assertStringNotContainsString('Beta', $text);
     }
 

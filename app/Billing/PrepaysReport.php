@@ -13,7 +13,7 @@ final class PrepaysReport
 {
     public const HEADERS = ['cohort', 'current', 'loa length', 'discounts', 'first_name', 'grad', 'graddate',
         'graduated', 'id', 'inactive', 'last_name', 'length', 'name', 'owed', 'paid', 'prepaid',
-        'prorataowed', 'prepaid_accrual', 'prorataowed_accrual', 'start', 'start_date', 'studentname'];
+        'prorataowed', 'prepaid_accrual', 'prorataowed_accrual', 'start', 'start_date', 'studentname', 'program'];
 
     public const NOTICE = 'Rebuilt from the surviving legacy experimental calculation. Requires accounting acceptance; not yet approved for reconciliation.';
 
@@ -27,17 +27,21 @@ final class PrepaysReport
     public static function run(array $filters): array
     {
         return DB::transaction(function () use ($filters) {
-            $students = EnrollmentAccounting::reportStudents($filters)
-                ->with('loas')->orderBy('id')->get();
+            $query = EnrollmentAccounting::reportStudents($filters)->with('loas')->orderBy('id');
+            ReportPrograms::filter($query->getQuery(), 'students.id', 'prepays', $filters);
+            $students = $query->get();
+            LegacyReportDates::load($students);
+            $programs = ReportPrograms::labels($students->modelKeys(), 'prepays', $filters);
             $students->filter(fn ($student) => $student->current_enrollment_id)->load('enrollments.stages', 'enrollments.events');
             $sums = $activity = [];
             foreach (array_chunk($students->modelKeys(), 300) as $ids) {
                 $transactions = DB::table('studenttransactions')->whereIn('student_id', $ids)
-                    ->where('transactiondate', '>=', $filters['transstart'])->where('transactiondate', '<', $filters['dateasof'])
                     ->select('id', 'student_id', 'transactiontype', 'transactionamount',
                         'enrollment_id', 'stage_enrollment_id', 'recognition')->orderBy('id');
-                foreach ($transactions->cursor() as $transaction) {
-                    $activity[$transaction->student_id][] = $transaction;
+                ReportTransactionDates::requireOurDate($transactions);
+                $transactions->where('processeddate', '>=', $filters['transstart'])->where('processeddate', '<', $filters['dateasof']);
+                $batch = $transactions->get();
+                foreach ($batch as $transaction) {
                     foreach (self::TYPES as $category => $types) {
                         if (! in_array(strtolower($transaction->transactiontype ?? ''), $types, true)) {
                             continue;
@@ -52,6 +56,9 @@ final class PrepaysReport
                         }
                         $sums[$transaction->student_id][$category] = Money::add($sums[$transaction->student_id][$category] ?? '0.00', (string) $amount);
                     }
+                }
+                foreach (EnrollmentAccounting::expandAllocations($batch) as $transaction) {
+                    $activity[$transaction->student_id][] = $transaction;
                 }
             }
             $rows = [];
@@ -69,13 +76,7 @@ final class PrepaysReport
                 if ($length < 0) {
                     throw ValidationException::withMessages(['report' => "Learner {$student->id} has graduation before enrollment. Correct it before generating Prepays."]);
                 }
-                $loaSeconds = 0;
-                foreach ($student->loas as $loa) {
-                    $begin = $loa->loa_start === null ? $start : CarbonImmutable::parse($loa->getRawOriginal('loa_start'), 'UTC');
-                    $end = $loa->loa_end === null ? $asOf : min(CarbonImmutable::parse($loa->getRawOriginal('loa_end'), 'UTC'), $asOf);
-                    // This older report adds all LOAs, including reversed/future intervals.
-                    $loaSeconds += $end->getTimestamp() - $begin->getTimestamp();
-                }
+                $loaSeconds = LeavePeriods::seconds($student, $asOf, $start);
                 $current = $asOf->getTimestamp() - $start->getTimestamp() - $loaSeconds;
                 $served = max(0, min($current, $length));
                 $length = $length === 0 ? 547 * 86400 : $length;
@@ -104,8 +105,15 @@ final class PrepaysReport
                 }
                 $unearned = $adjusted->abs()->minus($accrual);
                 $completed = false;
-                foreach (['graddate', 'sus_date', 'inactive_date', 'actualdategrad', 'wd_date'] as $field) {
+                $graduation = $student->getRawOriginal('actualdategrad') ?? $student->getRawOriginal('graddate');
+                if ($graduation !== null && CarbonImmutable::parse($graduation, 'UTC') <= $asOf) {
+                    $completed = true;
+                }
+                foreach (['sus_date', 'inactive_date', 'wd_date'] as $field) {
                     $raw = $student->getRawOriginal($field);
+                    if ($field === 'inactive_date' && $raw === null && $student->inactive) {
+                        $raw = LegacyReportDates::forStudent($student);
+                    }
                     if ($raw !== null && CarbonImmutable::parse($raw, 'UTC') <= $asOf) {
                         $completed = true;
                     }
@@ -135,7 +143,8 @@ final class PrepaysReport
                     'prorataowed' => (string) $prorata->toScale(6, RoundingMode::HalfUp),
                     'prepaid_accrual' => (string) $unearned->toScale(6, RoundingMode::HalfUp),
                     'prorataowed_accrual' => (string) $accrual->toScale(6, RoundingMode::HalfUp),
-                    'start' => $start->format('Y-m-d H:i:s'), 'start_date' => ReportFormatting::date($student->getRawOriginal('start_date')), 'studentname' => $name];
+                    'start' => $start->format('Y-m-d H:i:s'), 'start_date' => ReportFormatting::date($student->getRawOriginal('start_date')),
+                    'studentname' => $name, 'program' => $programs[$student->id] ?? 'No program recorded for period'];
                 $rows[] = array_replace(array_fill_keys(self::HEADERS, ''), $values);
             }
             $sort = match ($filters['sort'] ?? '') {

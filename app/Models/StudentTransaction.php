@@ -14,6 +14,13 @@ class StudentTransaction extends BillingModel
             'transactiondate' => 'immutable_datetime', 'processeddate' => 'immutable_datetime'];
     }
 
+    public function isHistorical(): bool
+    {
+        $date = $this->processeddate ?? $this->transactiondate;
+
+        return $date === null || $date->toDateString() < today()->subDays(30)->toDateString();
+    }
+
     public function student(): BelongsTo
     {
         return $this->belongsTo(Student::class);

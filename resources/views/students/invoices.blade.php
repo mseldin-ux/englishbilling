@@ -14,7 +14,8 @@
                 <a target="_blank" rel="noopener" href="{{ route('invoices.html', [$student,$invoice->id]) }}">HTML</a>
                 <a target="_blank" rel="noopener" href="{{ route('invoices.current-pdf', [$student,$invoice->id]) }}">Download Current PDF</a>
                 @if($invoice->has_pdf)<a target="_blank" rel="noopener" href="{{ route('invoices.pdf', [$student,$invoice->id]) }}">Stored PDF</a>@else<span>No stored PDF</span>@endif
-                <button type="button" data-pay-invoice="{{ $invoice->id }}" data-pay-amount="{{ $invoice->amount }}">Payment</button>
+                <button type="button" data-pay-invoice="{{ $invoice->id }}" data-pay-amount="{{ $invoice->amount }}"
+                    @if(config('billing.concurrent_stages')) data-payment-negative @endif>Payment</button>
                 <form method="post" action="{{ route('records.destroy', [$student,'invoices',$invoice->id]) }}" data-ajax data-refresh="invoices" data-confirm="Really delete this invoice? Linked transactions will be kept and unlinked.">
                     @csrf @method('DELETE')
                     <input type="hidden" name="version" value="{{ \App\Billing\RecordVersion::of($invoice) }}">

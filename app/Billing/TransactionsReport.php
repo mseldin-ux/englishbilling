@@ -20,14 +20,10 @@ final class TransactionsReport
     {
         return DB::transaction(function () use ($filters) {
             $query = DB::table('studenttransactions as t')->leftJoin('students as s', 's.id', '=', 't.student_id')
+                ->where(fn ($q) => $q->whereNull('s.id')->orWhere('s.hasenrolled', true))
                 ->select('t.id', 't.student_id', 't.transactiondate', 't.processeddate', 't.transactiontype',
                     't.transactionamount', 't.transactionnotes', 's.first_name', 's.middle_name', 's.last_name')
-                ->orderBy('t.transactiondate')->orderBy('t.id');
-            foreach (['startdate' => '>=', 'enddate' => '<'] as $field => $operator) {
-                if (! empty($filters[$field])) {
-                    $query->where('t.processeddate', $operator, $filters[$field]);
-                }
-            }
+                ->orderBy('t.processeddate')->orderBy('t.id');
             foreach (['transmin' => '>=', 'transmax' => '<='] as $field => $operator) {
                 if (isset($filters[$field])) {
                     $query->where('t.transactionamount', $operator, $filters[$field]);
@@ -43,6 +39,15 @@ final class TransactionsReport
                 $query->whereRaw("LOWER(t.transactiontype) LIKE LOWER(?) ESCAPE '!'", [
                     '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $type).'%',
                 ]);
+            }
+            ReportPrograms::filter($query, 't.student_id', 'transactions', $filters);
+            if (! empty($filters['startdate']) || ! empty($filters['enddate'])) {
+                ReportTransactionDates::requireOurDate($query, 't.processeddate', 't.id');
+                foreach (['startdate' => '>=', 'enddate' => '<'] as $field => $operator) {
+                    if (! empty($filters[$field])) {
+                        $query->where('t.processeddate', $operator, $filters[$field]);
+                    }
+                }
             }
             $rows = $totals = [];
             foreach ($query->cursor() as $transaction) {

@@ -14,12 +14,14 @@ use App\Billing\TransactionsReport;
 use Brick\Math\BigDecimal;
 use Brick\Math\RoundingMode;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class ReportController extends Controller
 {
     public function index()
     {
-        return view('reports.index', ['transactionTypes' => TransactionsReport::types()]);
+        return view('reports.index', ['transactionTypes' => TransactionsReport::types(), 'programs' => $this->programs()]);
     }
 
     public function expected(Request $request)
@@ -46,7 +48,7 @@ class ReportController extends Controller
             });
         }
 
-        return response()->view('reports.expected', ['report' => $report])->header('Cache-Control', 'private, no-store');
+        return $this->reportView('reports.expected', ['report' => $report]);
     }
 
     public function earned(Request $request)
@@ -58,14 +60,19 @@ class ReportController extends Controller
             'sort' => ['nullable', 'in:ID,Last Name,Graduation Date'],
             'skipzero' => ['sometimes', 'in:yes'],
             'format' => ['sometimes', 'in:html,csv'],
+            'program_id' => $this->programRule(),
         ]);
         $report = EarnedIncome::run($filters);
         if (($filters['format'] ?? 'html') === 'csv') {
             return ReportCsv::download('cgms-earned-income-report-'.$filters['dateasof'].'.csv', function (callable $write) use ($report) {
                 $write(['CGMS Earned Income Report']);
                 $write(['Parameters:']);
-                $write(['', 'Enrolled by:', $report['filters']['startdate'], 'Last possible enrollment date:',
-                    $report['filters']['lastpossiblestartdate'], 'Date As Of:', $report['filters']['dateasof']]);
+                $parameters = ['', 'Enrolled by:', $report['filters']['startdate'], 'Last possible enrollment date:',
+                    $report['filters']['lastpossiblestartdate'], 'Date As Of:', $report['filters']['dateasof']];
+                if (! empty($report['filters']['program_id'])) {
+                    array_push($parameters, 'Program ID:', $report['filters']['program_id']);
+                }
+                $write($parameters);
                 $write(['']);
                 $write(['', 'TOTALS:']);
                 foreach ($report['totals'] as $field => $amount) {
@@ -79,7 +86,7 @@ class ReportController extends Controller
             });
         }
 
-        return response()->view('reports.earned', ['report' => $report])->header('Cache-Control', 'private, no-store');
+        return $this->reportView('reports.earned', ['report' => $report]);
     }
 
     public function transactions(Request $request)
@@ -115,8 +122,7 @@ class ReportController extends Controller
             });
         }
 
-        return response()->view('reports.transactions', ['report' => $report, 'transactionTypes' => TransactionsReport::types()])
-            ->header('Cache-Control', 'private, no-store');
+        return $this->reportView('reports.transactions', ['report' => $report, 'transactionTypes' => TransactionsReport::types()]);
     }
 
     public function collections(Request $request)
@@ -124,7 +130,7 @@ class ReportController extends Controller
         $rules = ['enrolldate' => ['nullable', 'date_format:Y-m-d'],
             'enrolledbeforedate' => ['nullable', 'date_format:Y-m-d'],
             'next_due_date' => ['nullable', 'date_format:Y-m-d'], 'hideinactive' => ['sometimes', 'boolean'],
-            'format' => ['sometimes', 'in:html,csv']];
+            'format' => ['sometimes', 'in:html,csv'], 'program_id' => $this->programRule()];
         if ($request->filled('enrolldate')) {
             $rules['enrolledbeforedate'][] = 'after:enrolldate';
         }
@@ -153,17 +159,16 @@ class ReportController extends Controller
             });
         }
 
-        return response()->view('reports.tabular', ['report' => $report, 'kind' => 'collections',
+        return $this->reportView('reports.tabular', ['report' => $report, 'kind' => 'collections',
             'title' => 'Collections Report', 'headers' => CollectionsReport::HEADERS,
-            'rules' => 'Graduated learners are excluded. Amount filters use the next payment amount, not the balance. Dates are inclusive enrollment start, exclusive enrollment end and due-before date. Hide inactive now works as selected. Total owed is the signed current balance sum.'])
-            ->header('Cache-Control', 'private, no-store');
+            'rules' => 'Graduated learners are excluded. Amount filters use the next payment amount, not the balance. Dates are inclusive enrollment start, exclusive enrollment end and due-before date. Hide inactive now works as selected. Total owed is the signed current balance sum.']);
     }
 
     public function receivables(Request $request)
     {
         $filters = $request->validate(['startdate' => ['nullable', 'date_format:Y-m-d'],
             'enddate' => ['nullable', 'date_format:Y-m-d'], 'zeros' => ['sometimes', 'in:hidezero'],
-            'format' => ['sometimes', 'in:html,csv']]);
+            'format' => ['sometimes', 'in:html,csv'], 'program_id' => $this->programRule()]);
         $report = ReceivablesReport::run($filters);
         if (($filters['format'] ?? 'html') === 'csv') {
             return ReportCsv::download('cgms-receivables-report-'.($filters['enddate'] ?? '').'.csv', function (callable $write) use ($report) {
@@ -179,10 +184,9 @@ class ReportController extends Controller
             });
         }
 
-        return response()->view('reports.tabular', ['report' => $report, 'kind' => 'receivables',
+        return $this->reportView('reports.tabular', ['report' => $report, 'kind' => 'receivables',
             'title' => 'Enrolled Students / Receivables Report', 'headers' => ReceivablesReport::HEADERS,
-            'rules' => 'Signed transactions grouped by learner. Start date filters enrollment, not transaction dates. As-of excludes transactions whose customer OR processed date is on/after that date (or missing). Hide zero retains only positive rows, including exclusion of negative rows, but the overall total remains unfiltered as in legacy. Unassigned transactions form an UNKNOWN group unless the enrollment filter excludes them.'])
-            ->header('Cache-Control', 'private, no-store');
+            'rules' => 'Signed transactions grouped by learner. Start date filters enrollment, not transaction dates. As-of excludes transactions whose Our Date is on/after that date; missing Our Date must be corrected. Hide zero retains only positive rows, including exclusion of negative rows, but the overall total remains unfiltered as in legacy. Unassigned transactions form an UNKNOWN group unless the enrollment filter excludes them.']);
     }
 
     public function invoices(Request $request)
@@ -191,7 +195,8 @@ class ReportController extends Controller
             'invoicesentafterdate' => ['nullable', 'date_format:Y-m-d'],
             'invoicesentbeforedate' => ['nullable', 'date_format:Y-m-d'],
             'hidegraduated' => ['sometimes', 'boolean'], 'hideinactive' => ['sometimes', 'boolean'],
-            'showreceived' => ['sometimes', 'boolean'], 'format' => ['sometimes', 'in:html,csv']];
+            'showreceived' => ['sometimes', 'boolean'], 'format' => ['sometimes', 'in:html,csv'],
+            'program_id' => $this->programRule()];
         if ($request->filled('invoicesentafterdate')) {
             $rules['invoicesentbeforedate'][] = 'after_or_equal:invoicesentafterdate';
         }
@@ -226,7 +231,7 @@ class ReportController extends Controller
             });
         }
 
-        return response()->view('reports.invoices', ['report' => $report])->header('Cache-Control', 'private, no-store');
+        return $this->reportView('reports.invoices', ['report' => $report]);
     }
 
     public function prepays(Request $request)
@@ -237,6 +242,7 @@ class ReportController extends Controller
             'transstart' => ['required', 'date_format:Y-m-d'], 'dateasof' => ['required', 'date_format:Y-m-d', 'after:transstart'],
             'sort' => ['nullable', 'in:ID,Last Name,Graduation Date'], 'skipzero' => ['sometimes', 'in:yes'],
             'format' => ['sometimes', 'in:html,csv'],
+            'program_id' => $this->programRule(),
         ]);
         $report = PrepaysReport::run($filters);
         if (($filters['format'] ?? 'html') === 'csv') {
@@ -259,16 +265,16 @@ class ReportController extends Controller
             });
         }
 
-        return response()->view('reports.tabular', ['report' => $report, 'kind' => 'prepays',
+        return $this->reportView('reports.tabular', ['report' => $report, 'kind' => 'prepays',
             'title' => 'Prepays Report (Rebuilt)', 'headers' => PrepaysReport::HEADERS,
-            'rules' => 'Uses expected graduation minus enrollment for service duration, not program service days. Adds all LOA intervals with every end clipped to as-of and missing starts inferred from enrollment. Transaction start is inclusive, as-of exclusive, using customer dates. Fee/discount/writeoff categories use absolute net signed sums. Payment amounts are normalized negative, except exact-spelling Refund is positive, then net sum is made absolute. Dated graduation/suspension/inactivity/actual graduation/withdrawal ends cash prepaid regardless of flags. Missing lifecycle dates stay missing. Accrual summary retains the legacy additional discount subtraction. Derived student amounts use six decimals; totals are rounded once to cents.'])
-            ->header('Cache-Control', 'private, no-store');
+            'rules' => 'Uses expected graduation minus enrollment for service duration, not program service days. Leave ends are clipped to as-of, overlaps count once, and missing starts are inferred from enrollment. Transaction start is inclusive, as-of exclusive, using Our Date. Fee/discount/writeoff categories use absolute net signed sums. Payment amounts are normalized negative, except exact-spelling Refund is positive, then net sum is made absolute. Dated graduation/suspension/inactivity/actual graduation/withdrawal ends cash prepaid regardless of flags. Missing lifecycle dates stay missing. Accrual summary retains the legacy additional discount subtraction. Derived student amounts use six decimals; totals are rounded once to cents.']);
     }
 
     private function dateRules(Request $request): array
     {
         $rules = ['startdate' => ['nullable', 'date_format:Y-m-d'],
-            'enddate' => ['nullable', 'date_format:Y-m-d'], 'format' => ['sometimes', 'in:html,csv']];
+            'enddate' => ['nullable', 'date_format:Y-m-d'], 'format' => ['sometimes', 'in:html,csv'],
+            'program_id' => $this->programRule()];
         if ($request->filled('startdate')) {
             $rules['enddate'][] = 'after:startdate';
         }
@@ -279,6 +285,7 @@ class ReportController extends Controller
     private function parameters(array $filters, array $labels = ['startdate' => 'start date', 'enddate' => 'end date']): array
     {
         $parameters = [''];
+        $labels['program_id'] = 'program id';
         foreach ($labels as $field => $label) {
             if (isset($filters[$field]) && $filters[$field] !== '' && ! ($field === 'whichtransactions' && $filters[$field] === 'all')) {
                 array_push($parameters, $label, $filters[$field]);
@@ -296,14 +303,19 @@ class ReportController extends Controller
             'enrolldate' => ['nullable', 'date_format:Y-m-d'],
             'usesimplefields' => ['sometimes', 'boolean'],
             'format' => ['sometimes', 'in:html,csv'],
+            'program_id' => $this->programRule(),
         ]);
         $report = AttributableIncome::run($filters);
         if (($filters['format'] ?? 'html') === 'csv') {
             return ReportCsv::download('cgms-attributableincome-report.csv', function (callable $write) use ($report) {
                 $write([$report['title']]);
                 $write(['Parameters:']);
-                $write(['', 'start date', $report['filters']['startdate'], 'end date', $report['filters']['enddate'],
-                    'enroll on or after', $report['filters']['enrolldate'] ?? '']);
+                $parameters = ['', 'start date', $report['filters']['startdate'], 'end date', $report['filters']['enddate'],
+                    'enroll on or after', $report['filters']['enrolldate'] ?? ''];
+                if (! empty($report['filters']['program_id'])) {
+                    array_push($parameters, 'program id', $report['filters']['program_id']);
+                }
+                $write($parameters);
                 $write(['']);
                 $write(['']);
                 $write(['TOTALS FOR ALL TRANSACTIONS BY TYPE']);
@@ -325,7 +337,7 @@ class ReportController extends Controller
                     $values = [];
                     foreach ($report['csvFields'] as $field) {
                         $value = $row[$field] ?? '0.00';
-                        if ($field !== 'earnedincome' && ! empty($report['filters']['usesimplefields']) && is_numeric($value)) {
+                        if (! in_array($field, ['earnedincome', 'program'], true) && ! empty($report['filters']['usesimplefields']) && is_numeric($value)) {
                             $value = (string) BigDecimal::of($value)->toScale(2, RoundingMode::Down);
                         }
                         $values[] = $value;
@@ -335,7 +347,25 @@ class ReportController extends Controller
             });
         }
 
-        return response()->view('reports.attributable', ['report' => $report, 'explanations' => self::explanations()])
+        return $this->reportView('reports.attributable', ['report' => $report, 'explanations' => self::explanations()]);
+    }
+
+    private function programRule(): array
+    {
+        return ['nullable', 'integer', Rule::exists('programs', 'id')->where(
+            fn ($query) => $query->whereNull('staged')->orWhere('staged', false)
+        )];
+    }
+
+    private function programs()
+    {
+        return DB::table('programs')->where(fn ($query) => $query->whereNull('staged')->orWhere('staged', false))
+            ->orderBy('program')->orderBy('id')->get(['id', 'program']);
+    }
+
+    private function reportView(string $view, array $data)
+    {
+        return response()->view($view, [...$data, 'programs' => $this->programs()])
             ->header('Cache-Control', 'private, no-store');
     }
 

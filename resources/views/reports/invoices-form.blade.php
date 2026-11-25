@@ -1,5 +1,6 @@
 <form action="{{ route('reports.invoices') }}" method="get">
     <div class="field-grid">
+        @include('reports.program-filter')
         <label>Enrolled On or After <input type="date" name="studentenrolleddate" value="{{ $filters['studentenrolleddate'] ?? '' }}"></label>
         <label>Invoice Sent On or After <input type="date" name="invoicesentafterdate" value="{{ $filters['invoicesentafterdate'] ?? '' }}"></label>
         <label>Invoice Sent Through (midnight, inclusive) <input type="date" name="invoicesentbeforedate" value="{{ $filters['invoicesentbeforedate'] ?? '' }}"></label>

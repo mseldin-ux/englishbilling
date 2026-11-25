@@ -8,10 +8,12 @@
 </tbody></table>
 <details><summary>Calculation rules and legacy exceptions</summary>
     <p>Includes enrollment on/after the first date and before the last enrollment date, with expected graduation
-        on/after the first date or missing. Invoiced is the sum of absolute Fee and Declined Fee amounts across
-        all transaction dates, including after the as-of date. Discounts, adjustments, payments, and writeoffs
-        do not reduce it. Earned = invoiced × service ratio; unearned = invoiced − earned.</p>
-    <p>Uses the same legacy program-service, lifecycle, and additive LOA rules as Attributable Income.
+        on/after the first date or missing. Invoiced is the sum of absolute Fee and Declined Fee amounts
+        with an Our Date before the as-of date. Fees without Our Date must be corrected before reporting.
+        Discounts, adjustments, payments, and writeoffs
+        do not reduce it. Earned is calculated using each enrollment or stage's service ratio;
+        unearned = invoiced − earned.</p>
+    <p>Uses the same legacy program-service, lifecycle, and leave rules as Attributable Income.
         Skip Zero excludes zero service progress, not zero balances or zero fees.
         Earned/unearned detail values show six decimals; totals are rounded once to cents.
         Missing sort values appear first, with learner ID breaking ties.</p>

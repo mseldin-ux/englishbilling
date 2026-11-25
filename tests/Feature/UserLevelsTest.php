@@ -34,6 +34,7 @@ class UserLevelsTest extends TestCase
 
     public function test_no_reports_staff_can_use_billing_and_existing_student_locks(): void
     {
+        $this->travelTo(now()->setDate(2026, 11, 23));
         $this->actingAs(User::factory()->create(['access_level' => 'billing_no_reports']));
         $student = new Student;
         $student->forceFill(['first_name' => 'Synthetic', 'balance' => '0.00'])->save();
@@ -57,6 +58,92 @@ class UserLevelsTest extends TestCase
         $this->assertSame('0.00', $student->fresh()->balance);
         $this->withHeader('X-Student-Lock', '')->postJson("/students/{$student->id}/transactions", [])
             ->assertStatus(423);
+    }
+
+    public function test_lower_billing_level_cannot_create_edit_or_delete_historical_transactions(): void
+    {
+        $this->travelTo(now()->setDate(2026, 11, 23));
+        $this->actingAs(User::factory()->create(['access_level' => 'billing_no_reports']));
+        $student = new Student;
+        $student->forceFill(['balance' => '0.00'])->save();
+        $this->obtainEditingLock($student);
+        $url = "/students/{$student->id}/transactions";
+        $data = ['transactiondate' => '2026-01-01', 'processeddate' => '2026-10-24',
+            'transactiontype' => 'Fee', 'transactionamount' => '100.00'];
+        $this->postJson($url, [...$data, 'processeddate' => '2026-10-23'])->assertForbidden();
+        $this->postJson($url, [...$data, 'processeddate' => null])->assertUnprocessable()->assertJsonValidationErrors('processeddate');
+        $this->postJson($url, $data)->assertOk();
+        $transaction = StudentTransaction::firstOrFail();
+        $version = RecordVersion::of($transaction);
+        $this->patchJson($url.'/'.$transaction->id, ['version' => $version, 'processeddate' => '2026-10-23'])
+            ->assertForbidden();
+        $this->patchJson($url.'/'.$transaction->id, ['version' => $version, 'processeddate' => null])
+            ->assertUnprocessable()->assertJsonValidationErrors('processeddate');
+        $this->patchJson($url.'/'.$transaction->id, ['version' => $version, 'transactionamount' => '105.00'])
+            ->assertOk();
+        $this->assertSame('105.00', $student->fresh()->balance);
+
+        $old = new StudentTransaction;
+        $old->forceFill(['student_id' => $student->id, 'transactiondate' => '2026-10-23',
+            'processeddate' => null, 'transactiontype' => 'Fee', 'transactionamount' => '5.00'])->save();
+        $version = RecordVersion::of($old->fresh());
+        $this->patchJson($url.'/'.$old->id, ['version' => $version, 'processeddate' => '2026-11-23'])->assertForbidden();
+        $this->deleteJson($url.'/'.$old->id, ['version' => $version])->assertForbidden();
+        $this->assertDatabaseHas('studenttransactions', ['id' => $old->id, 'transactionamount' => '5.00']);
+        $response = $this->get($url)->assertOk()->assertSee('Read-only: historical transaction');
+        $document = new \DOMDocument;
+        @$document->loadHTML($response->getContent());
+        $xpath = new \DOMXPath($document);
+        $this->assertCount(1, $xpath->query('//input[@form="transactions-'.$old->id.'" and @name="transactionamount" and @disabled]'));
+        $this->assertCount(0, $xpath->query('//button[@form="transactions-'.$old->id.'"]'));
+    }
+
+    public function test_missing_dates_and_invoice_deletion_cannot_bypass_historical_transaction_restrictions(): void
+    {
+        $this->travelTo(now()->setDate(2026, 11, 23));
+        $this->actingAs(User::factory()->create(['access_level' => 'billing_no_reports']));
+        $student = new Student;
+        $student->forceFill(['balance' => '0.00'])->save();
+        $this->obtainEditingLock($student);
+        $invoice = new Invoice;
+        $invoice->forceFill(['student_id' => $student->id, 'amount' => '10.00'])->save();
+        $transaction = new StudentTransaction;
+        $transaction->forceFill(['student_id' => $student->id, 'invoice_id' => $invoice->id,
+            'transactionamount' => '10.00'])->save();
+        $this->deleteJson("/students/{$student->id}/transactions/{$transaction->id}",
+            ['version' => RecordVersion::of($transaction->fresh())])->assertForbidden();
+        $this->deleteJson("/students/{$student->id}/invoices/{$invoice->id}",
+            ['version' => RecordVersion::of($invoice->fresh())])->assertForbidden();
+        $this->assertDatabaseHas('studenttransactions', ['id' => $transaction->id, 'invoice_id' => $invoice->id]);
+        $this->assertDatabaseHas('invoices', ['id' => $invoice->id]);
+    }
+
+    public function test_admin_can_correct_historical_transactions(): void
+    {
+        $this->assertHistoricalTransactionCorrection(['is_admin' => true, 'access_level' => 'billing_no_reports']);
+    }
+
+    public function test_staff_can_correct_historical_transactions(): void
+    {
+        $this->assertHistoricalTransactionCorrection(['access_level' => 'staff']);
+    }
+
+    private function assertHistoricalTransactionCorrection(array $level): void
+    {
+        $this->travelTo(now()->setDate(2026, 11, 23));
+        $this->actingAs(User::factory()->create($level));
+        $student = new Student;
+        $student->forceFill(['balance' => '0.00'])->save();
+        $this->obtainEditingLock($student);
+        $url = "/students/{$student->id}/transactions";
+        $this->postJson($url, ['transactiondate' => '2025-01-01', 'processeddate' => '2025-01-02',
+            'transactiontype' => 'Fee', 'transactionamount' => '10.00'])->assertOk();
+        $transaction = $student->transactions()->firstOrFail();
+        $this->patchJson($url.'/'.$transaction->id, ['version' => RecordVersion::of($transaction),
+            'transactionamount' => '12.00'])->assertOk();
+        $this->deleteJson($url.'/'.$transaction->id,
+            ['version' => RecordVersion::of($transaction->fresh())])->assertOk();
+        $this->assertSame('0.00', $student->fresh()->balance);
     }
 
     public function test_records_level_is_denied_all_billing_routes_and_all_write_methods(): void

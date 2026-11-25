@@ -1,5 +1,6 @@
 <form action="{{ route('reports.attributable') }}" method="get">
     <div class="field-grid">
+        @include('reports.program-filter')
         <label>Start Date <input type="date" name="startdate" value="{{ $filters['startdate'] ?? '' }}" required></label>
         <label>End Date (exclusive) <input type="date" name="enddate" value="{{ $filters['enddate'] ?? '' }}" required></label>
         <label>Ignore Students Enrolled Before (optional)

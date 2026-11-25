@@ -23,6 +23,7 @@
             <label>Sent <input name="datesent" type="date" value="{{ $creating ? today()->format('Y-m-d') : $invoice->datesent?->format('Y-m-d') }}"></label>
             <label>Due <input name="nextdate" type="date" value="{{ $creating ? $student->next_due_date?->format('Y-m-d') : $invoice->nextdate?->format('Y-m-d') }}" @required($creating)></label>
             <label>Amount <input name="amount" inputmode="decimal" value="{{ $creating ? $student->payment_amount_due : $invoice->amount }}" @required($creating)></label>
+            @include('students.stage-allocations', ['allocationForm' => $formId, 'allocationRecord' => $invoice])
             <label>Reference <input name="invoicereference" maxlength="255" value="{{ $creating ? $student->invoicenumber : $invoice->invoicereference }}" @required($creating)></label>
             <label>Batch ID <input name="batchid" maxlength="128" value="{{ $invoice?->batchid }}"></label>
             <label>Urgent message <input name="urgent_message" maxlength="255" value="{{ $invoice?->urgent_message }}"></label>

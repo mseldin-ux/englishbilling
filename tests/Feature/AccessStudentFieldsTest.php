@@ -7,6 +7,7 @@ use App\Billing\BillingTables;
 use App\Billing\RecordsFields;
 use App\Billing\RecordVersion;
 use App\Billing\StudentFields;
+use App\Models\Program;
 use App\Models\Student;
 use App\Models\User;
 use Illuminate\Database\QueryException;
@@ -34,9 +35,13 @@ class AccessStudentFieldsTest extends TestCase
     private function learner(): Student
     {
         $this->actingAs(User::factory()->create());
+        $program = new Program;
+        $program->forceFill(['program' => 'Example'])->save();
         $student = new Student;
         $student->forceFill(['first_name' => 'Synthetic', 'balance' => '0.00',
-            'wd' => true, 'loa' => true, 'sponsored' => true])->save();
+            'program_id' => $program->id, 'start_date' => '2025-01-01', 'graddate' => '2027-01-01',
+            'wd' => true, 'wd_date' => '2026-01-01', 'loa' => true, 'loa_date' => '2026-01-01',
+            'sponsored' => true, 'sponsor_contact' => 'Contact', 'sponsor_email' => 'contact@example.org'])->save();
         $this->obtainEditingLock($student);
 
         return $student;

@@ -69,6 +69,37 @@ displayed row order by regenerating scheduled-payment IDs, as Django did.
 Unedited invoice-date/percentage metadata is retained. Historical invalid or
 missing dates are not silently repaired; entered changes are validated.
 
+## Enrollment and required student information
+
+**Has enrolled** distinguishes an intake prospect from an enrolled learner.
+The migration marks all existing learners as enrolled; legacy imports default
+to enrolled as well. A new detailed-view learner defaults to enrolled, while
+a new brief-records learner defaults to not enrolled. Both views allow changing
+the checkbox after a confirmation.
+On the detailed and brief edit forms, hover over or focus the ⓘ beside a
+checkbox to see an explanation.
+
+Non-enrolled learners remain in Student Records. Browse normally hides them,
+but an explicit name or ID search or **Include non-enrolled** shows them.
+All eight existing financial reports exclude them and their financial activity,
+including historical transactions; changing the checkbox back restores that
+activity to reports. The underlying records and balances are not deleted.
+
+On every detailed-view save, enrolled learners need Program, Start Date, and
+Expected Grad Date. Inactive, LOA, Withdrew, Suspended, and On Extension each
+require their corresponding date; In group requires Group name; Sponsored
+requires Sponsor contact and email. All entered graduation and status dates
+must be strictly after Start Date. These checks cover the whole saved record,
+so existing missing or inconsistent values must be corrected before saving
+unrelated detail edits. Brief-records saves do not enforce those detail rules.
+New graduations require enrollment. Removing enrollment does not erase an
+existing graduation or prevent changing the checkbox.
+
+Leave-of-absence records require a start after the learner's Start Date. An
+end, if supplied, must be strictly after the leave start. Leaves may be
+open-ended and cannot overlap another leave for the same learner, regardless
+of program or stage; one leave may end on the day the next starts.
+
 ## User levels
 
 Admins assign one of five levels in **Users**:
@@ -80,6 +111,15 @@ Admins assign one of five levels in **Users**:
 | Billing Staff (No Reports) | Billing access without report pages/CSV exports or global payment-plan template management |
 | records | Approved Access student fields: view, search, copy, create, and edit; no billing-only fields or deletion. Also Forms and Workflows (staff stages except Finance clearance) |
 | forms | Forms only: create, edit, submit, and download forms; learner type-ahead shows name, cohort, and User ID only |
+
+Only Admin and Staff may create, edit, or delete transactions over 30 calendar
+days old, or delete an invoice when doing so would unlink such transactions.
+Age uses Our Date (processed date), falling back to Customer Date when Our Date
+is missing. Exactly 30 days is allowed; if both dates are missing, the
+transaction is treated as historical. Lower-level billing staff cannot change
+a recent transaction into a historical one.
+New transactions require Our Date. Dated transaction reports require the
+relevant records to have Our Date; correct missing dates before running them.
 
 Existing users retain their previous access. The **records** level uses the
 dedicated Student Records workspace only. Its server-side field whitelist covers
@@ -162,30 +202,77 @@ amounts, create tuition fees, or rewrite PDFs.
 
 The new history supports sequential whole-program enrollments (full/associate)
 and staged Full Certificate enrollments under the same learner ID and ledger.
-Current student program/start fields summarize the latest enrollment.
+The current student program is the selected stage program for catalog-based
+stages; the student start date remains the start of the shared certificate
+enrollment. Stage start/end dates are recorded separately.
 
-- Admins configure stage service days at `/admin/stage-settings`, also linked
-  from **Utilities**. Programs whose name contains `Full`
-  are eligible. No durations are guessed or seeded: a stage cannot start until
-  its positive duration is configured. Each stage retains the agreed duration,
-  independent of later default changes.
+Concurrent stages are enabled for staging with `BILLING_CONCURRENT_STAGES=true`
+after running the stage-allocation migration. The flag defaults to false.
+Staff should compare financial reports with the existing system before production
+use. Once overlapping stages or allocations exist, do not disable the flag:
+the older workflow cannot safely represent them.
+
+- Admins use **Utilities > Manage programs and stage sequences**
+  (`/admin/programs`) to create/edit programs. `staged` and `certleading` are
+  nullable booleans. Null `staged` means non-staged; null `certleading` preserves
+  the legacy `type=cert` eligibility rule. Explicit true/false overrides type.
+  Migration initializes existing `type=cert` entries as certificate leading.
+- Create one program per stage, with that stage's positive `servicedays`.
+  Point `nextprog` to the following stage; null or zero means final stage.
+  Select the same non-staged, certificate-leading `certificate_program_id`
+  on every stage in a sequence. This retains one shared academic enrollment,
+  grade sheet, and certificate program across all stages. Stage programs are
+  not separate certificate choices on graduation forms.
+- Selecting a shared certificate program makes legacy type, short name, director
+  team emails, and all three survey/employment URLs read-only. These values are
+  linked live, not copied: changes (including clearing a value) on the shared
+  certificate apply to its stages. Submitted overrides are ignored. Workflow
+  Settings also edits these values only on the shared certificate, not each
+  linked stage. Existing local values are retained but are not used while linked.
+- Configure the complete sequence before use (creating the final stage first
+  makes linking easy). Missing targets, cycles, shared successors, mismatched
+  certificate programs, and sequences longer than three stages are rejected.
+  Program edits use stale-version checks; programs cannot be deleted here.
+  Legacy service-day defaults still used directly by historical learners cannot
+  be changed here because that would change past reports.
+- **Create an AL** automatically starts the selected staged program and its
+  shared certificate enrollment, atomically, using the entered start date.
+  There is no separate mode selector or second enrollment step. Missing/invalid
+  stage configuration prevents creation rather than leaving a partial learner.
+  Whole-program creation and imported learners retain their existing behavior.
+- Choosing a staged program while editing an unbilled record also starts its
+  enrollment. If the learner already has invoices or transactions, staff must
+  use **Start new program enrollment** instead; a direct program change is
+  rejected rather than silently reassigning historical billing.
+- Each enrolled stage snapshots its service days, program name, and next program.
+  Later catalog changes do not rewrite these agreements or historical results.
 - Stages are Online coursework, In-person residency, and Practicum internship.
-  Staff may choose them out of order, but cannot overlap active stages/programs.
-  Staff confirmation of prior financial settlement is required for transitions.
+  Staff may choose them out of order and, when enabled, overlap different stages.
+  Staff confirmation of prior financial settlement is required when starting a
+  stage or another program.
   The system does not equate settlement with a zero balance or automatically
   charge for future stages.
-- **Complete stage** records its date. Stages 1/2 show “Stage 1 done” / “Stage 2
-  done” between enrollments; stage 3 completion marks graduation. Academic
-  completion is distinct from reaching 100% financially earned.
+- **Complete stage** records its date without affecting other stages or
+  graduating the learner. **Enroll in next stage** proposes the recorded next
+  program and requires an explicit start date and settlement confirmation.
+  Graduation is a separate learner-wide action after active stages are closed.
+  No fees are generated automatically. Academic completion is distinct from
+  reaching 100% financially earned.
+- Rare out-of-order/repeated stages remain possible through **Exception: enroll
+  in a different stage**. Staff must select a stage for the same certificate and
+  give a reason, which is recorded in history. Normal transitions still follow
+  the agreed next-program link; no old stage or financial record is erased.
 - Staff, Billing Staff (No Reports), and admins edit this section with the
   existing student-wide lock and stale-version protection. Records users see
   only a read-only current-stage summary in their table/form; they cannot
   access enrollment controls or financial data.
-- Admin stage-duration configuration is linked from **Utilities**, not every
-  learner's detail page. Existing configured durations are unchanged.
+- Existing pre-catalog staged enrollments retain their earlier accounting,
+  stage numbering, and defaults without automatic conversion. If any remain
+  open, the Programs page links to their legacy `/admin/stage-settings` editor.
+  That editor is not needed for new program-linked enrollments.
 - Each non-legacy stage/whole-program record has prefilled edit controls even
-  after completion or withdrawal. The latest ended record offers two separate
-  actions, neither of which may overlap a later enrollment/stage:
+  after completion or withdrawal. Eligible ended records offer two separate
+  actions, subject to overlap and history validation:
   **Resume study** records a return date, excludes the closed interval from
   service days (unioned with LOAs), and preserves earlier reports and valid
   settlement markers. **Undo closure** corrects a mistaken latest closure:
@@ -200,16 +287,21 @@ Current student program/start fields summarize the latest enrollment.
   existing settlement events remain effective. All changes require a reason
   and the student editing lock. Completion does not prevent transaction CRUD.
 - Transactions, invoices, LOAs, and payment schedules identify their enrollment
-  and stage where relevant. New entries default to the current enrollment/stage.
+  and stage where relevant. When multiple stages are active, select the stage
+  explicitly or allocate a transaction or invoice across stages. Allocations
+  must add exactly to the record amount; payments linked to an invoice may use
+  only stages included on that invoice. They do not create extra ledger entries.
   Transaction/invoice selectors allow prior enrollments for corrections.
-  An invoice and its linked transactions must agree on enrollment/stage.
+  New leave applies to all stages of the current staged enrollment.
   Application-fee transactions are explicitly marked **Application fee
   (immediate)**; labels/notes are never used to guess this classification.
-- Payment-plan editing/generation concerns the current enrollment/stage only.
+- Payment-plan editing/generation concerns the selected current stage.
   Drafts default to that stage's start date and its explicitly classified
   application-fee total (zero if there is none), not the legacy $100 assumption.
   Previous schedules are retained. The overall learner balance remains a single
-  signed ledger total, without stage-specific payment balances.
+  signed ledger total, without stage-specific payment balances. Staff continue
+  to maintain the learner-wide next-payment date and amount manually for
+  Collections, including any new stage obligation.
 - On the first new enrollment for a returning learner, the existing program,
   learner accounting dates/status, service-day settings and LOAs are preserved
   as legacy context. Existing billing rows acquire a legacy-enrollment link
@@ -226,28 +318,37 @@ Current student program/start fields summarize the latest enrollment.
   to correct an erroneous settlement. Correcting a status date changes that
   event's date with an audit entry.
   The graduation workflow refuses a form from an earlier enrollment or a
-  staged learner who has not reached stage 3, rather than graduating a
+  staged learner with an active stage, rather than graduating a
   different/current program accidentally.
 - For new enrollment activity, service recognition is straight-line over the
-  saved service days, capped at 100%, excluding overlapping LOA intervals within
-  that enrollment/stage. Overlapping leave intervals are counted only once.
+  saved service days, capped at 100%, excluding learner-wide LOA intervals
+  intersecting that enrollment/stage. Overlapping leave intervals are counted
+  only once. New or edited leave dates cannot overlap another learner leave.
   Extensions add no service days and are 100% earned on their effective date.
   Application fees are immediately earned. No service is accrued for an
   unpurchased future stage or during a gap.
-- Reports select financial activity using their existing date conventions,
+- Reports select financial activity using Our Date for transaction periods,
   calculate each enrollment/stage's contribution separately, and sum it into
   one learner row. Completed/settled units contribute 100% of their selected
   activity even when the learner is now in another program or stage. Completion
   does not pull transactions outside the report's selection into the report.
-  Attributable Income retains its transaction window; Earned Income retains its
-  enrollment-cohort/all-fees convention for legacy activity, and excludes future
-  new-enrollment fees at its as-of cutoff. Prepays retains its transaction window
+  Attributable Income retains its transaction window; Earned Income includes fees
+  with Our Date before its as-of cutoff for all enrollments, including
+  legacy activity. Prepays retains its transaction window
   and remains subject to its existing accounting-acceptance notice.
 - Existing report type/sign classifications and rounding remain unchanged.
   Invoice report hide-graduated/inactive filters use the owning enrollment's
   status as of the report end date (today when omitted), not a later return
-  enrollment's status. Legacy rows retain their original filtering rules;
-  converted legacy rows use the preserved status snapshot.
+  enrollment's status. Legacy graduation uses Actual Grad Date, or Expected
+  Grad Date when actual is missing. For an inactive legacy learner whose
+  enrollment started before 2022 and whose inactive date is missing, reports
+  infer it from the latest transaction Our Date, recorded status date, or leave
+  start/end. Inference is not used if a transaction lacks Our Date, the start
+  or all evidence is missing, or the latest evidence is in 2022 or later.
+  Invoices fall back to the learner's current status when an effective date
+  remains unresolved; other calculations retain their existing missing-date
+  behavior. Inferred dates do not update learner records. Correcting historical
+  activity can change the inference and hence historical reports.
   Mixed-enrollment progress is labeled **Per enrollment/stage**, since one
   service percentage cannot describe several fees with different service
   periods. The preserved legacy context is used for historical progress fields.
@@ -255,10 +356,27 @@ Current student program/start fields summarize the latest enrollment.
   stage-start date filters. Ranges include both dates; matching uses existence
   queries so multiple qualifying stages do not duplicate learners. When a stage
   is selected, its date filters apply to that same stage.
+- All reports can filter by the overall program, not an individual stage. A
+  matching learner's otherwise qualifying activity remains included even when
+  it relates to another program. Attributable Income, Transactions, Expected
+  Income, and Invoices match program enrollments overlapping their activity
+  window; an open window is unbounded. Collections uses today, Earned Income
+  uses its as-of date, and Receivables and Prepays use the day before their
+  exclusive as-of cutoff (today for Receivables without a cutoff). Existing
+  enrollment-cohort, activity-date, and other report filters still apply.
+  Learner-row reports list all recorded overall programs in that period, with
+  incomplete legacy history marked. Imported records only retain their last
+  recorded program and known dates; missing earlier program changes cannot be
+  reconstructed. Enrollment start and end dates are inclusive for membership.
+  A return after withdrawal is recorded as a separate enrollment; program
+  matching treats each enrollment record as one continuous interval.
+  Without a program filter, existing rows and numeric calculations are unchanged.
 - Reasoned corrections to agreed service days and start/end dates are available
-  in enrollment history. They are audited, cannot introduce overlaps, and
+  in enrollment history. They are audited, cannot introduce invalid overlaps, and
   intentionally may change prior report results. Preserved legacy context
-  cannot be rewritten through those controls.
+  cannot be rewritten through those controls. Backdated stage starts that cross
+  earlier learner-wide status history, and completions before later stage status
+  activity, are rejected for review rather than silently changing recognition.
 
 ### Repeating staging refreshes
 
@@ -820,9 +938,10 @@ options and optional received payments/credits are available.
 
 Invoice and received totals use absolute amounts, while detail rows retain
 their signed amounts. Received rows match Payment/Credit substrings for the
-selected learner, not only invoice-linked transactions. Their lower date bound
-uses **customer date**, but the upper uses **processed date**, preserving the
-legacy mixed-date rule. Learner outstanding is clamped at zero; excess is
+selected learner, not only invoice-linked transactions. Both payment date
+bounds use **Our Date**. Hide-graduated/inactive filters use the status at the
+upper sent-date bound, or today if omitted. For legacy statuses with no effective
+date, they fall back to the learner's current status. Learner outstanding is clamped at zero; excess is
 prepayment. Overall outstanding is invoiced minus received without clamping.
 Without Show Received, legacy learner outstanding remains zero while the
 overall outstanding is total invoiced. Groups sort by string learner ID.
@@ -833,7 +952,7 @@ The supplied legacy template has no Invoices report form; its date helper also
 fails on the Python dates passed by this route. Validation therefore compared
 the underlying source data directly.
 
-For sent dates 2026-01-01 through midnight 2026-11-01, independent SQL on the
+Before the Our Date correction, for sent dates 2026-01-01 through midnight 2026-11-01, independent SQL on the
 untouched source matched all 629 learner groups' invoice/payment counts and
 amounts, plus all 2,608 invoice and 2,355 received-payment detail rows (IDs,
 names, dates, types, and signed amounts). Totals: invoiced 2,997,581.25; received 2,197,952.72;
@@ -848,8 +967,8 @@ unrestricted invoice report will flag these until corrected.
 
 `/reports/receivables` groups signed ledger amounts by learner. Its optional
 start date filters **student enrollment**, not transaction dates. Its optional
-as-of date requires **both customer and processed dates** to precede midnight,
-excluding rows with either missing date. All transaction types contribute.
+as-of date requires **Our Date** to precede midnight. A relevant transaction
+missing Our Date stops a dated report with a correction message. All transaction types contribute.
 Without an as-of cutoff, rows with missing dates remain eligible; null amounts
 do not contribute, matching legacy calculation.
 
@@ -859,7 +978,7 @@ Per owner approval, unassigned transactions appear as an UNKNOWN group and
 contribute to the total unless an enrollment filter excludes them.
 CSV retains the three legacy detail columns and dated filename.
 
-The live route returned HTTP 500, consistent with its broken Python date
+Before the Our Date correction, the live route returned HTTP 500, consistent with its broken Python date
 helper. Independent SQL on the untouched source matched all 296 learner amounts
 for enrollment on/after 2026-01-01 and both transaction dates before 2026-11-01;
 total 850,174.79. Positive-row filtering leaves 147 rows, without changing total.
@@ -873,17 +992,17 @@ asserted to reproduce a functioning live report: the live endpoint returns
 HTTP 500.
 
 Requires enrollment start (inclusive), enrollment end (exclusive), first
-customer transaction date (inclusive), and as-of date (exclusive). Expected
+Our Date (inclusive), and as-of date (exclusive). Expected
 graduation must be on/after enrollment start or missing. Duration is expected
 graduation minus enrollment, **not program service days**. Missing graduation
 uses as-of for calculation only; a zero duration falls back to 547 days after
 service clipping, as in the surviving experiment. Reversed enrollment/
 graduation raises an explicit error.
 
-The older LOA algorithm intentionally differs from Earned/Attributable:
-every missing/future end is clipped to as-of, missing starts use enrollment,
-and all intervals are added independently, including overlaps, reversed
-intervals, and negative durations from future starts.
+Leaves are clipped at as-of; future starts do not count and overlapping days
+are counted once. Completely blank leave records are ignored. Missing starts
+with a recorded end use enrollment for this legacy calculation;
+reversed intervals before the cutoff produce an explicit correction error.
 
 Transaction categories retain the experiment's conventions:
 
@@ -897,9 +1016,11 @@ Transaction categories retain the experiment's conventions:
 - Writeoffs = absolute net signed Write off sum.
 - Accrual earned = abs((owed − discounts) × clipped service ratio);
   prepaid accrual = abs(owed − discounts) − accrual earned.
-- Prorata owed = accrual earned unless an existing graduation, suspension,
-  inactive, actual-graduation, or withdrawal date is on/before as-of; then it
-  equals paid + writeoffs regardless of status flags.
+- Prorata owed = accrual earned unless the actual graduation date (or expected
+  when actual is missing), suspension, inactive, or withdrawal date is
+  on/before as-of; then it equals paid + writeoffs. The legacy experiment
+  considers recorded dates regardless of status flags, except that an inferred
+  inactive date requires the inactive flag.
 - Cash prepaid = max(0, paid + writeoffs − prorata owed).
   Skip Zero selects positive cash prepaid.
 - The legacy accrual-earned **summary** additionally subtracts discounts;
@@ -910,7 +1031,7 @@ Missing lifecycle dates remain blank instead of the experiment's nondeterministi
 The 22-column CSV preserves the old field order. Derived per-learner amounts
 use six decimals; aggregate rational totals are rounded once to cents.
 
-Executed the surviving Python experiment read-only against the untouched local
+Before the date and leave corrections, executed the surviving Python experiment read-only against the untouched local
 source database, with debug-file writes redirected to in-memory buffers.
 For January–October 2026 enrollment/transactions, as of November 1, all 299
 learners' financial values matched at six decimals, along with inferred dates,
@@ -942,8 +1063,8 @@ February 26,980.98, March 63,704.41.
 
 ### Transactions
 
-`/reports/transactions` filters by **processed date**, inclusive start and
-exclusive end, but sorts detail rows by **customer transaction date**, then ID.
+`/reports/transactions` filters by **Our Date**, inclusive start and
+exclusive end, and sorts detail rows by Our Date, then ID.
 Dates, signed minimum/maximum amount, and type filters are optional. Amount
 bounds are inclusive; decimal cents are supported instead of the legacy
 integer-only parsing. Zero is a valid bound.
@@ -964,8 +1085,8 @@ Live comparison for processed dates 2026-01-01 through before 2026-02-01 matched
 all 598 exported rows (including names, dates, types, amounts at cents, notes,
 and learner/transaction IDs) and every type subtotal.
 
-Both reports require login, support HTML and CSV, and perform a single read-only
-joined query rather than per-row learner lookups. CSV uses the same literal-text
+Both reports require login, support HTML and CSV, and use read-only queries
+rather than per-row learner lookups. CSV uses the same literal-text
 formula protection as Attributable Income; this can add a leading apostrophe
 to unsafe text cells, including the legacy `+` subtotal marker.
 
@@ -976,14 +1097,21 @@ enrollment end, and as-of date (midnight). Expected graduation must be on/after
 the enrollment start or missing, matching legacy selection. Student status
 does not otherwise exclude a learner.
 
-Invoiced is the sum of absolute `Fee` and `Declined Fee` transactions across
-**all dates**, including after the as-of date. Payments, discounts, adjustments,
-and writeoffs do not reduce this report's invoiced amount. Null fee amounts
-are ignored as in the legacy helper. Earned equals invoiced times the shared
-legacy program-service ratio; unearned equals invoiced minus earned.
+Invoiced is the sum of absolute `Fee` and `Declined Fee` transactions whose
+Our Date is strictly before the as-of date. Fees dated on or after the
+cutoff are excluded for both legacy and managed enrollments. An eligible fee
+with a missing Our Date stops the report with a correction message.
+Payments, discounts, adjustments, and writeoffs do not reduce invoiced. Null
+fee amounts are ignored. Earned uses the service ratio for each enrollment or
+stage; unearned equals invoiced minus earned. Historic fee corrections are
+reflected when a report is rerun; historical versions of edited or deleted
+transactions are not retained. Legacy leave records starting on or after the
+cutoff do not alter the earlier leave calculation. Other mutable legacy
+status and program data may still limit reconstruction of historical results.
 Student-level earned/unearned values show six decimals in HTML and CSV;
 aggregate earned/unearned totals sum exact rational values and round once to
-cents. CSV preserves all 29 legacy detail columns and its dated filename.
+cents. CSV preserves the 29 legacy detail columns, adds the program column,
+and keeps its dated filename.
 
 The legacy “Skip Zero Balance Records” option actually skips learners whose
 service ratio is zero, not those with a zero balance or no fees. The new label
@@ -993,8 +1121,9 @@ null comparison crash; unsorted output is deterministically ID-ordered.
 Empty nullable detail fields export as blank cells, with shared CSV formula
 protection.
 
-Read-only live comparison of enrollment 2026-01-01 through before 2026-11-01,
-as of 2026-11-01, matched all 299 learners' financial values (earned/unearned to
+Before the as-of fee cutoff correction, a read-only live comparison of enrollment
+2026-01-01 through before 2026-11-01, as of 2026-11-01, matched all 299
+learners' financial values (earned/unearned to
 six decimals), dates, status flags, names, identifiers, and service/LOA durations.
 Totals matched: invoiced 2,589,320.40; earned 780,117.50;
 unearned 1,809,202.90. Service ratios retain up to 12 decimal places rather
@@ -1005,8 +1134,8 @@ than binary-float artifacts.
 Attributable Income requires explicit start/end dates, includes the start date,
 and excludes the end date at midnight. Its optional enrollment cutoff is
 inclusive. Both the full and fewer-field variants support HTML and CSV.
-Unassigned transactions, null customer dates, and null amounts do not contribute,
-matching the legacy inner join and customer-date filter. Archive/status flags
+Unassigned transactions and null amounts do not contribute. A relevant
+transaction with no Our Date stops the report for correction. Archive/status flags
 do not filter learners out of the financial totals.
 
 Key preserved report-specific rules:
@@ -1027,8 +1156,10 @@ Key preserved report-specific rules:
 - Program completion uses configured service days or the legacy 547-day
   fallback, naive-calendar elapsed time less LOA durations, and a 0–100% ratio.
   Missing dates use the legacy three-year inference without writing corrections.
-- Preserve dated lifecycle completion overrides, the pre-2022 archive rule,
-  additive overlapping LOAs, and last-LOA-only end clipping. Suspension's last
+- Preserve dated lifecycle completion overrides and the pre-2022 archive rule.
+  Leave intervals are clipped at as-of and overlapping days count once. Missing
+  leave starts are ignored in this legacy progress calculation; reversed leave
+  intervals require correction. Suspension's last
   date is diagnostic; it does not truncate service time. PIF alone does not
   force completion.
 
@@ -1327,6 +1458,29 @@ restricted MySQL users, TLS, private environment configuration, backups,
 The web root must be `public/`, not the application or Django workspace root.
 Do not expose the original dump or the legacy source database.
 
+### Deploying the program-stage catalog update
+
+Back up the database and deploy the code and additive migration together.
+For an existing installation with the earlier enrollment migrations applied:
+
+```sh
+php artisan down &&
+php artisan migrate --path=database/migrations/2026_11_20_000001_add_program_stage_catalog.php --force &&
+php artisan route:clear &&
+php artisan view:clear &&
+php artisan route:cache &&
+php artisan up
+```
+
+Stop on an error and resolve it before reopening. Reload PHP-FPM if OPcache
+does not check file timestamps. The migration does not convert learners,
+discard history, create programs, or change financial records. The new catalog
+fields and locally maintained stage programs survive `billing:refresh`; only
+test learner enrollment history is discarded as before.
+If a later source dump introduces a program ID already used by a local staged
+program, refresh refuses before changing data rather than attaching production
+learners to the wrong program. Resolve that ID collision explicitly first.
+
 ### Admin utilities: mail connection test
 
 Admins can open **Utilities** in the navigation (`/utilities`) to send an
@@ -1359,3 +1513,13 @@ defaults to `APP_URL`. If you use a separate hostname, point it at this same
 application.
 
 The Laravel framework is distributed under the MIT license.
+
+### Quick Commands Cheat Sheet
+php artisan down * maintenance mode
+php artisan up * normal mode
+php artisan billing:refresh * preview update
+php artisan billing:refresh --apply --source=englishbilling_legacy_d3cfe21d --target=englishbilling_laravel * apply update
+php artisan serve --host=127.0.0.1 --port=8001 * serve locally
+php artisan route:clear * clear cached routes
+php artisan view:clear * clear cached views
+php artisan route:list --name=enrollments * example, show that a route called enrollments is known

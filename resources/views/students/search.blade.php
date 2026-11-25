@@ -7,6 +7,10 @@
             <input type="hidden" name="showall" value="0">
             <input type="checkbox" name="showall" value="1" @checked($filters['showall'] ?? false)>
         </label>
+        <label>Include non-enrolled
+            <input type="hidden" name="include_unenrolled" value="0">
+            <input type="checkbox" name="include_unenrolled" value="1" @checked($filters['include_unenrolled'] ?? false)>
+        </label>
         <label>Graduation Date <input type="date" name="graduation_date" value="{{ $filters['graduation_date'] ?? '' }}"></label>
         <label>Payment Due Between <input type="date" name="past_due_start" value="{{ $filters['past_due_start'] ?? '' }}"></label>
         <label>and <input type="date" name="past_due_end" value="{{ $filters['past_due_end'] ?? '' }}"></label>

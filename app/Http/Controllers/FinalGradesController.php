@@ -27,8 +27,8 @@ class FinalGradesController extends Controller
             'gradedate' => now()->format('Y-m-d'), 'gradenotes' => null];
         if ($programs->contains('id', $request->integer('program'))) {
             $values['program_id'] = $request->integer('program');
-        } elseif ($student && $programs->contains('id', $student->program_id)) {
-            $values['program_id'] = $student->program_id;
+        } elseif ($student && $programs->contains('id', $student->academicProgramId())) {
+            $values['program_id'] = $student->academicProgramId();
         }
         $values['enrollment_id'] = $request->has('enrollment_id')
             ? ($request->input('enrollment_id') === 'legacy' ? null : $request->input('enrollment_id'))

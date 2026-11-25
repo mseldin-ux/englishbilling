@@ -13,6 +13,7 @@ final class ExpectedIncome
     {
         return DB::transaction(function () use ($filters) {
             $query = DB::table('anticipatedpayment as p')->leftJoin('students as s', 's.id', '=', 'p.student_id')
+                ->where(fn ($q) => $q->whereNull('s.id')->orWhere('s.hasenrolled', true))
                 ->select('p.id', 'p.student_id', 'p.paymentduedate', 'p.paymentamount', 'p.paymentnotes',
                     's.first_name', 's.middle_name', 's.last_name')
                 ->orderBy('p.paymentduedate')->orderBy('p.id');
@@ -21,6 +22,7 @@ final class ExpectedIncome
                     $query->where('p.paymentduedate', $operator, $filters[$field]);
                 }
             }
+            ReportPrograms::filter($query, 'p.student_id', 'expected', $filters);
             $rows = $months = [];
             $total = '0.00';
             foreach ($query->cursor() as $payment) {

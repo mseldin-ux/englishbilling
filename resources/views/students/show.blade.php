@@ -18,16 +18,21 @@
 <p>Status: {{ $student->status() }} | Account: {{ $student->pif ? 'PIF' : 'Open' }}</p>
 <p><a href="{{ route('statements.html', $student) }}" target="_blank" rel="noopener">HTML Statement</a> |
     <a href="{{ route('statements.pdf', $student) }}" target="_blank" rel="noopener">Statement PDF</a></p>
-@if($planned)
+@foreach($plannedItems as $plannedItem)
+    @php $planned = $plannedItem['payment']; @endphp
     <p>Planned payment found: ${{ $planned->paymentamount }} on {{ $planned->paymentduedate->format('m/d/Y') }}.
-        @if($plannedInvoiceExists)
+        @if(config('billing.concurrent_stages') && $planned->stage_enrollment_id)
+            Stage {{ $student->currentEnrollment->stages->firstWhere('id', $planned->stage_enrollment_id)?->stage }}.
+        @endif
+        @if($plannedItem['invoiceExists'])
             Found matching invoice.
         @else
             No matching invoice.
-            <button type="button" data-planned-amount="{{ $planned->paymentamount }}" data-planned-date="{{ $planned->paymentduedate->format('Y-m-d') }}" data-planned-notes="{{ $planned->paymentnotes }}">Create Invoice</button>
+            <button type="button" data-planned-amount="{{ $planned->paymentamount }}" data-planned-date="{{ $planned->paymentduedate->format('Y-m-d') }}" data-planned-notes="{{ $planned->paymentnotes }}"
+                @if(config('billing.concurrent_stages') && $planned->stage_enrollment_id) data-planned-period="{{ $planned->enrollment_id }}:{{ $planned->stage_enrollment_id }}" @endif>Create Invoice</button>
         @endif
     </p>
-@endif
+@endforeach
 <form id="student-form" method="post" action="{{ route('students.update', $student) }}" data-ajax data-partial data-dirty>
     @csrf @method('PATCH')
     <input type="hidden" name="version" value="{{ \App\Billing\RecordVersion::of($student) }}">

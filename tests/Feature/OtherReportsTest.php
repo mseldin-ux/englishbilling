@@ -103,12 +103,15 @@ class OtherReportsTest extends TestCase
         $second = $this->transaction('Payment', '0.02', ['processeddate' => '2026-01-31 23:59:59', 'transactiondate' => '2024-01-01']);
         $this->transaction('Payment', '-100.00', ['processeddate' => '2026-02-01']);
         $this->transaction('Payment', '-200.00', ['processeddate' => '2025-12-31 23:59:59']);
-        $this->transaction('Payment', '-400.00', ['processeddate' => null]);
+        $undated = $this->transaction('Payment', '-400.00', ['processeddate' => null]);
+        $this->get('/reports/transactions?startdate=2026-01-01&enddate=2026-02-01')->assertSessionHasErrors('report');
+        $this->assertCount(5, TransactionsReport::run([])['rows']);
+        $undated->delete();
         $report = TransactionsReport::run(['startdate' => '2026-01-01', 'enddate' => '2026-02-01']);
-        $this->assertSame([$second->id, $first->id], array_column($report['rows'], 'id'));
+        $this->assertSame([$first->id, $second->id], array_column($report['rows'], 'id'));
         $this->assertSame(['Payment' => '-9.99'], $report['totals']);
         $this->assertSame('Synthetic Middle Learner', $report['rows'][0]['name']);
-        $this->assertCount(5, TransactionsReport::run([])['rows']);
+        $this->assertCount(4, TransactionsReport::run([])['rows']);
     }
 
     public function test_transaction_type_filters_are_literal_case_insensitive_substrings(): void

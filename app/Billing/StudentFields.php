@@ -6,6 +6,7 @@ final class StudentFields
 {
     public const GROUPS = [
         'Learner and contact information' => [
+            'hasenrolled' => ['Has enrolled', 'checkbox'],
             'cohort' => ['Cohort', 'text', 255],
             'first_name' => ['First Name', 'text', 255],
             'last_name' => ['Last Name', 'text', 255],
@@ -82,6 +83,25 @@ final class StudentFields
         'associate' => ['Associate', 'text', 255],
     ];
 
+    public const CHECKBOX_HELP = [
+        'hasenrolled' => "Marks an actual enrollee. If unchecked, the learner and their financial activity are excluded from financial users' browse view and existing financial reports.",
+        'graduated' => 'Marks the learner as graduated. A learner must be enrolled before being marked graduated.',
+        'pif' => 'Marks the learner as paid in full; it does not automatically record a payment.',
+        'archived' => 'Hides the learner from normal browse unless archived records are included.',
+        'inactive' => 'Marks the learner as inactive. An inactive date is required when saving the detailed record.',
+        'loa' => 'Marks the learner as on a leave of absence. Enter the leave date and record leave periods in the Leaves of Absence section.',
+        'wd' => 'Marks the learner as withdrawn. A withdrawal date is required when saving the detailed record.',
+        'sus' => 'Marks the learner as suspended. A suspension date is required when saving the detailed record.',
+        'onextension' => 'Marks the learner as on an extension. An extension start date is required when saving the detailed record.',
+        'in_group' => 'Marks the learner as belonging to a group. A group name is required when saving the detailed record.',
+        'transferred' => 'Records that the learner has transferred; this checkbox does not itself transfer their record.',
+        'sponsored' => 'Marks the learner as sponsored. Sponsor contact and email are required when saving the detailed record.',
+        'self_pay' => 'Records that the learner is self-paying; this is independent of the sponsorship and paid-in-full flags.',
+        'combination_payment' => 'Records a combination payment arrangement; this is independent of the other payer flags.',
+        'self_directed' => 'Records the Self Directed flag; it does not change the learner’s program or delivery method.',
+        'comp_college' => 'Records the Comp College flag from student records; it does not automatically change billing or program information.',
+    ];
+
     public static function rules(): array
     {
         $rules = [];
@@ -99,6 +119,7 @@ final class StudentFields
                 };
             }
         }
+        $rules['hasenrolled'] = ['sometimes', 'required', 'boolean'];
 
         return $rules;
     }

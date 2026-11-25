@@ -1,5 +1,6 @@
 <form action="{{ route('reports.transactions') }}" method="get">
     <div class="field-grid">
+        @include('reports.program-filter')
         <label>Minimum Signed Amount <input type="number" step="0.01" name="transmin" value="{{ $filters['transmin'] ?? '' }}"></label>
         <label>Maximum Signed Amount <input type="number" step="0.01" name="transmax" value="{{ $filters['transmax'] ?? '' }}"></label>
         <label>Starting Processed Date <input type="date" name="startdate" value="{{ $filters['startdate'] ?? '' }}"></label>

@@ -1,9 +1,10 @@
 <p class="hint">{{ \App\Billing\PrepaysReport::NOTICE }}</p>
 <form action="{{ route('reports.prepays') }}" method="get">
     <div class="field-grid">
+        @include('reports.program-filter')
         <label>Enrolled On or After <input type="date" name="startdate" value="{{ $filters['startdate'] ?? '' }}" required></label>
         <label>Enrolled Before <input type="date" name="lastpossiblestartdate" value="{{ $filters['lastpossiblestartdate'] ?? '' }}" required></label>
-        <label>First Customer Transaction Date <input type="date" name="transstart" value="{{ $filters['transstart'] ?? '' }}" required></label>
+        <label>First Our Date <input type="date" name="transstart" value="{{ $filters['transstart'] ?? '' }}" required></label>
         <label>Prepaid As Of (exclusive) <input type="date" name="dateasof" value="{{ $filters['dateasof'] ?? '' }}" required></label>
         <label>Sort By <select name="sort">
             @foreach(['' => 'Unsorted (ID order)', 'ID' => 'ID', 'Last Name' => 'Last Name', 'Graduation Date' => 'Graduation Date'] as $value => $label)

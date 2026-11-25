@@ -51,6 +51,7 @@ class EnrollmentTest extends TestCase
         DB::transaction(fn () => Enrollments::start($this->student->fresh(), [
             'program_id' => $this->program->id, 'mode' => $mode, 'started_on' => $date, 'stage' => 1,
         ]));
+        $this->student->refresh()->forceFill(['graddate' => '2030-01-01'])->save();
 
         return $this->student->fresh()->currentEnrollment;
     }
@@ -178,7 +179,7 @@ class EnrollmentTest extends TestCase
         $this->student->forceFill(['program_id' => $this->program->id, 'start_date' => '2025-01-01',
             'graddate' => '2027-01-01'])->save();
         $transaction = new StudentTransaction;
-        $transaction->forceFill(['student_id' => $this->student->id, 'transactiondate' => '2025-01-02',
+        $transaction->forceFill(['student_id' => $this->student->id, 'transactiondate' => '2025-01-02', 'processeddate' => '2025-01-02',
             'transactiontype' => 'Fee', 'transactionamount' => '1000.00'])->save();
         $filters = ['startdate' => '2025-01-01', 'enddate' => '2025-01-11'];
         $before = AttributableIncome::run($filters);
@@ -205,7 +206,7 @@ class EnrollmentTest extends TestCase
     {
         $enrollment = $this->start();
         $this->obtainEditingLock($this->student);
-        $data = ['transactiondate' => '2026-01-02', 'transactiontype' => 'Fee', 'transactionamount' => '100.00'];
+        $data = ['transactiondate' => '2026-01-02', 'processeddate' => '2026-01-02', 'transactiontype' => 'Fee', 'transactionamount' => '100.00'];
         $this->postJson("/students/{$this->student->id}/transactions", $data)->assertOk();
         $this->assertDatabaseHas('studenttransactions', ['student_id' => $this->student->id,
             'enrollment_id' => $enrollment->id, 'stage_enrollment_id' => $enrollment->stages->first()->id]);
@@ -337,7 +338,7 @@ class EnrollmentTest extends TestCase
         $this->student->forceFill(['program_id' => $this->program->id, 'start_date' => '2024-01-01',
             'graddate' => '2024-12-31'])->save();
         $transaction = new StudentTransaction;
-        $transaction->forceFill(['student_id' => $this->student->id, 'transactiondate' => '2024-01-02',
+        $transaction->forceFill(['student_id' => $this->student->id, 'transactiondate' => '2024-01-02', 'processeddate' => '2024-01-02',
             'transactiontype' => 'Fee', 'transactionamount' => '1000.00'])->save();
         $filters = ['startdate' => '2025-01-01', 'lastpossiblestartdate' => '2027-01-01',
             'transstart' => '2025-01-01', 'dateasof' => '2025-06-01'];
@@ -440,7 +441,7 @@ class EnrollmentTest extends TestCase
                 'version' => RecordVersion::of($fee->fresh()), 'transactionamount' => '1100.00',
             ])->assertOk();
             $this->postJson("/students/{$this->student->id}/transactions", [
-                'transactiondate' => '2026-04-12', 'transactiontype' => 'Payment', 'transactionamount' => '-100.00',
+                'transactiondate' => '2026-04-12', 'processeddate' => '2026-04-12', 'transactiontype' => 'Payment', 'transactionamount' => '-100.00',
             ])->assertOk();
             $this->deleteJson("/students/{$this->student->id}/transactions/{$fee->id}", [
                 'version' => RecordVersion::of($fee->fresh()),
@@ -451,8 +452,19 @@ class EnrollmentTest extends TestCase
 
     public function test_stage_configuration_is_in_utilities_not_each_learner_detail(): void
     {
-        $this->get('/utilities')->assertOk()->assertSee('Configure program stage service days');
+        $this->get('/utilities')->assertOk()->assertSee('Manage programs and stage sequences');
         $this->get("/detail/{$this->student->id}")->assertOk()->assertDontSee('Configure program stage service days');
+    }
+
+    public function test_renaming_a_program_does_not_remove_its_existing_legacy_stage_defaults(): void
+    {
+        $this->start();
+        $this->program->program = 'Renamed Certificate';
+        $this->program->save();
+        $this->get('/admin/stage-settings')->assertOk()->assertSee('Renamed Certificate');
+        $this->put('/admin/stage-settings', ['days' => [$this->program->id => [2 => 48]]])->assertSessionHasNoErrors();
+        $this->assertDatabaseHas('program_stage_definitions', ['program_id' => $this->program->id, 'stage' => 2, 'service_days' => 48]);
+        $this->assertDatabaseHas('student_stage_enrollments', ['stage' => 1, 'service_days' => 100]);
     }
 
     public function test_graduation_workflow_refuses_an_earlier_enrollment_form(): void

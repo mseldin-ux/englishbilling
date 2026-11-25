@@ -12,7 +12,7 @@ final class AttributableIncome
 {
     public const SIMPLE_FIELDS = ['id', 'name', 'fee', 'declined fee', 'refund', 'discounts', 'paid',
         'adjustments', 'credits', 'adjustedowed', 'adjustedpaid', 'ar', 'invoiced', 'writeoffs',
-        'currenttimeinprogram', 'lengthofprogram', 'pct', 'earnedincome'];
+        'currenttimeinprogram', 'lengthofprogram', 'pct', 'earnedincome', 'program'];
 
     public const SUMMARY_FIELDS = ['invoiced', 'adjustedowed', 'adjustedpaid', 'ar', 'totalearned'];
 
@@ -33,8 +33,7 @@ final class AttributableIncome
     {
         return DB::transaction(function () use ($filters) {
             $query = DB::table('studenttransactions as t')->join('students as s', 's.id', '=', 't.student_id')
-                ->where('t.transactiondate', '>=', $filters['startdate'])
-                ->where('t.transactiondate', '<', $filters['enddate'])
+                ->where('s.hasenrolled', true)
                 ->whereNotNull('t.transactionamount')
                 ->select('t.id', 't.student_id', 't.transactiontype', 't.transactionamount', 's.first_name', 's.last_name')
                 ->addSelect('t.enrollment_id', 't.stage_enrollment_id', 't.recognition')
@@ -43,7 +42,11 @@ final class AttributableIncome
                 $query->leftJoin('student_enrollments as e', 'e.id', '=', 't.enrollment_id')
                     ->whereRaw('CASE WHEN t.enrollment_id IS NULL THEN s.start_date ELSE e.started_on END >= ?', [$filters['enrolldate']]);
             }
-            $types = $rows = [];
+            ReportPrograms::filter($query, 't.student_id', 'attributable', $filters);
+            ReportTransactionDates::requireOurDate($query, 't.processeddate', 't.id');
+            $query->where('t.processeddate', '>=', $filters['startdate'])
+                ->where('t.processeddate', '<', $filters['enddate']);
+            $types = $rows = $transactions = [];
             foreach ($query->cursor() as $transaction) {
                 $id = (string) $transaction->student_id;
                 $type = strtolower($transaction->transactiontype ?? 'None');
@@ -51,7 +54,10 @@ final class AttributableIncome
                 $types[$type] = Money::add($types[$type] ?? '0.00', $amount);
                 $rows[$id] ??= ['id' => $id, 'name' => ($transaction->first_name ?? 'None').' '.($transaction->last_name ?? 'None'), 'types' => []];
                 $rows[$id]['types'][$type] = Money::add($rows[$id]['types'][$type] ?? '0.00', $amount);
-                $rows[$id]['transactions'][] = $transaction;
+                $transactions[] = $transaction;
+            }
+            foreach (EnrollmentAccounting::expandAllocations($transactions) as $transaction) {
+                $rows[(string) $transaction->student_id]['transactions'][] = $transaction;
             }
             // Keep the owner's legacy sample layout independent of the database scan order.
             $types = array_replace(array_intersect_key(array_fill_keys(self::TYPE_ORDER, '0.00'), $types), $types);
@@ -59,6 +65,7 @@ final class AttributableIncome
             $totalEarned = BigRational::of(0);
             foreach (array_chunk(array_keys($rows), 300) as $ids) {
                 $students = Student::whereIn('id', $ids)->with(['program', 'loas'])->orderBy('id')->get();
+                LegacyReportDates::load($students);
                 $students->filter(fn ($student) => $student->current_enrollment_id)->load('enrollments.stages', 'enrollments.events');
                 foreach ($students as $student) {
                     $id = (string) $student->id;
@@ -75,15 +82,29 @@ final class AttributableIncome
                 }
             }
             ksort($rows, SORT_STRING);
-            // Round the aggregate once, rather than accumulating rounded per-learner amounts.
-            $calculated['totalearned'] = (string) $totalEarned->toScale(2, RoundingMode::HalfUp);
             $extra = [...ProgramProgress::FIELDS, 'earnedincome', 'currenttimeinprogram'];
             $simple = ! empty($filters['usesimplefields']);
+            $fields = $simple ? self::SIMPLE_FIELDS : ['id', 'name', ...array_keys($types), ...array_keys($calculated), ...$extra];
+            $csvFields = $simple ? self::SIMPLE_FIELDS : ['id', 'name', ...array_keys($types), ...self::SUMMARY_FIELDS, ...$extra];
+            $programField = 'program';
+            if (! $simple) {
+                while (in_array($programField, $fields, true) || in_array($programField, $csvFields, true)) {
+                    $programField .= ' (enrollment)';
+                }
+                $fields[] = $programField;
+                $csvFields[] = $programField;
+            }
+            $programs = ReportPrograms::labels(array_column($rows, 'id'), 'attributable', $filters);
+            foreach ($rows as &$row) {
+                $row[$programField] = $programs[$row['id']] ?? 'No program recorded for period';
+            }
+            unset($row);
+            // Round the aggregate once, rather than accumulating rounded per-learner amounts.
+            $calculated['totalearned'] = (string) $totalEarned->toScale(2, RoundingMode::HalfUp);
 
             return ['title' => 'CGMS Attributable Income Report', 'filters' => $filters, 'types' => $types,
                 'calculated' => $calculated, 'rows' => array_values($rows),
-                'fields' => $simple ? self::SIMPLE_FIELDS : ['id', 'name', ...array_keys($types), ...array_keys($calculated), ...$extra],
-                'csvFields' => $simple ? self::SIMPLE_FIELDS : ['id', 'name', ...array_keys($types), ...self::SUMMARY_FIELDS, ...$extra]];
+                'fields' => $fields, 'csvFields' => $csvFields];
         });
     }
 

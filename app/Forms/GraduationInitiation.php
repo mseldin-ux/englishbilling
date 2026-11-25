@@ -38,8 +38,8 @@ final class GraduationInitiation
 
     public static function programs(?int $current = null)
     {
-        return Program::where('type', 'cert')->when($current, fn ($query) => $query->orWhere('id', $current))
-            ->orderBy('programdesc')->get(['id', 'program', 'programdesc', 'shortname']);
+        return Program::certificatePrograms()->when($current, fn ($query) => $query->orWhere('id', $current))
+            ->orderBy('programdesc')->get(['id', 'program', 'programdesc', 'shortname', 'certificate_program_id']);
     }
 
     /**
@@ -53,7 +53,7 @@ final class GraduationInitiation
         $required = $submitting ? 'required' : 'nullable';
         // A program later removed from the certificate list stays valid on forms that already use it.
         $program = Rule::exists('programs', 'id')->where(function ($query) use ($form) {
-            $query->where('type', 'cert');
+            $query->whereIn('id', self::programs()->pluck('id'));
             if ($form?->program_id) {
                 $query->orWhere('id', $form->program_id);
             }

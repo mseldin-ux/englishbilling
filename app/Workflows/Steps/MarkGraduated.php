@@ -45,13 +45,27 @@ class MarkGraduated extends Step
                     "Waiting: {$lock->name} ({$lock->username}) has this learner's record open for editing. Retrying automatically.");
             }
             $student = Student::whereKey($studentId)->lockForUpdate()->firstOrFail();
+            if (! $student->hasenrolled) {
+                throw new StepFailed('The learner must be marked enrolled before graduation.');
+            }
+            if (! $student->start_date || now()->toDateString() <= $student->start_date->format('Y-m-d')) {
+                throw new StepFailed('Graduation must be after the learner’s start date.');
+            }
             $enrollment = $student->currentEnrollment;
             if ($enrollment && ((int) $graduation->form->enrollment_id !== (int) $enrollment->id
                 || (int) $graduation->form->program_id !== (int) $enrollment->program_id)) {
                 throw new StepFailed("This graduation form belongs to an earlier enrollment. Review the learner's current enrollment before continuing.");
             }
-            if ($enrollment?->mode === 'staged' && $enrollment->stages->last()?->stage !== 3) {
-                throw new StepFailed('Complete intermediate stages from enrollment history. Program graduation requires stage 3.');
+            if ($enrollment?->mode === 'staged' && config('billing.concurrent_stages')
+                && $enrollment->stages->contains(fn ($stage) => ! $stage->ended_on)) {
+                throw new StepFailed('Complete or close every active stage before graduating the learner.');
+            }
+            if ($enrollment?->mode === 'staged' && config('billing.concurrent_stages')
+                && ($student->loa || $student->onextension || $student->wd || $student->sus || $student->inactive)) {
+                throw new StepFailed('Clear the learner’s leave or other status before graduation.');
+            }
+            if ($enrollment?->mode === 'staged' && ! config('billing.concurrent_stages') && ! $enrollment->stages->last()?->isFinal()) {
+                throw new StepFailed('Complete intermediate stages from enrollment history. Program graduation requires the final stage (stage 3 for legacy staged enrollments).');
             }
             $before = $student->getRawOriginal();
             $today = now()->startOfDay();

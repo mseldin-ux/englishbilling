@@ -33,7 +33,7 @@ final class FinalGrades
     {
         return Program::query()->whereIn('id', GradedItem::query()->select('program_id'))
             ->when($current, fn ($query) => $query->orWhere('id', $current))
-            ->orderBy('programdesc')->get(['id', 'program', 'programdesc', 'shortname']);
+            ->orderBy('programdesc')->get(['id', 'program', 'programdesc', 'shortname', 'certificate_program_id']);
     }
 
     /**

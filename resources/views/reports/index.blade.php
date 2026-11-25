@@ -1,6 +1,9 @@
 @extends('layouts.app')
 @section('content')
 <h2>Reports</h2>
+<p>Program filters select learners enrolled in the overall program, not individual stages. All qualifying activity for those learners remains included.
+    Activity reports use their date window; snapshot reports use their as-of date (or today). Imported program history may be incomplete.</p>
+<p>Transaction periods use Our Date. Dated reports require relevant transactions to have an Our Date.</p>
 <h2>Attributable Income Report</h2>
 <p>Income recognized from fees in the selected period, less fee adjustments and discounts, with program-service calculations.</p>
 @include('reports.attributable-form', ['filters' => old()])
@@ -12,7 +15,7 @@
 <p>Transactions filtered by processed date, signed amount, and transaction-type substring. Filters are optional.</p>
 @include('reports.transactions-form', ['filters' => old()])
 <h2>Earned Income Report</h2>
-<p>All-date fees for students in an enrollment window, prorated by service progress as of a date, with earned/unearned totals.</p>
+<p>Fees before the as-of date for students in an enrollment window, prorated by service progress, with earned/unearned totals.</p>
 @include('reports.earned-form', ['filters' => old()])
 <h2>Collections Report</h2>
 <p>Next-payment filters and current balances for non-graduated learners. Filters are optional.</p>

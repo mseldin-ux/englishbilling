@@ -41,7 +41,7 @@ class WorkflowSettingsController extends Controller
         }
 
         return view('workflows.settings', ['definitions' => Settings::DEFINITIONS, 'values' => $values,
-            'programs' => Program::orderBy('programdesc')->get(['id', 'programdesc', 'shortname', 'type', 'director_team_email', 'course_completion_survey_url', 'employer_survey_url', 'employment_form_url']),
+            'programs' => Program::whereNull('certificate_program_id')->orderBy('programdesc')->get(['id', 'programdesc', 'shortname', 'type', 'director_team_email', 'course_completion_survey_url', 'employer_survey_url', 'employment_form_url']),
             'stages' => $stages, 'notifications' => $notifications, 'workflows' => Workflows::all()]);
     }
 
@@ -93,6 +93,9 @@ class WorkflowSettingsController extends Controller
                 }, $user);
             }
             foreach ($data['programs'] ?? [] as $id => $values) {
+                if (Program::findOrFail((int) $id)->certificate_program_id) {
+                    throw ValidationException::withMessages(["programs.{$id}" => 'These settings are inherited. Edit the shared certificate program instead.']);
+                }
                 DB::table('programs')->where('id', (int) $id)->update([
                     'director_team_email' => implode(', ', EmailStep::addresses($values['director_team_email'] ?? null)) ?: null,
                     'course_completion_survey_url' => trim((string) ($values['course_completion_survey_url'] ?? '')) ?: null,

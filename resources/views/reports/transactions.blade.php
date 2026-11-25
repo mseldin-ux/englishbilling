@@ -2,7 +2,7 @@
 @section('content')
 <h2>Transactions Report</h2>
 @include('reports.transactions-form', ['filters' => $report['filters']])
-<p>Filters use processed dates (inclusive start, exclusive end); detail rows are ordered by customer transaction date.
+<p>Filters use Our Date (inclusive start, exclusive end); detail rows are ordered by Our Date.
     Blank dates or amounts leave that boundary unrestricted. Totals use signed amounts.
     Type selections are case-insensitive substring matches: “Payments only” matches “payment”, not Check or Pago.</p>
 <h3>Totals</h3>

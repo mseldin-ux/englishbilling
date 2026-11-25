@@ -47,7 +47,8 @@ class WorkflowTest extends TestCase
         $this->student = new Student;
         $this->student->forceFill(['first_name' => 'Ada', 'last_name' => 'Learner', 'cohort' => 'EL-2026',
             'emailaddr' => 'ada@example.org, ada.work@example.org', 'streetaddress' => '1 Main St', 'city' => 'Hartford',
-            'state' => 'CT', 'zipcode' => '06101', 'country' => 'USA', 'program_id' => $this->program->id, 'balance' => '0.00'])->save();
+            'state' => 'CT', 'zipcode' => '06101', 'country' => 'USA', 'program_id' => $this->program->id,
+            'start_date' => '2025-01-01', 'balance' => '0.00'])->save();
         $this->director = User::factory()->create(['access_level' => 'records', 'email' => 'director@example.org', 'name' => 'Jane Director']);
     }
 
@@ -689,6 +690,19 @@ class WorkflowTest extends TestCase
         Workflows::runPending();
         $this->assertSame('done', $step->fresh()->status);
         $this->assertSame(1, (int) $this->student->fresh()->graduated);
+    }
+
+    public function test_graduation_workflow_does_not_graduate_an_unenrolled_learner(): void
+    {
+        $this->throughFinalGrades();
+        $this->actingAs(User::factory()->create(['access_level' => 'staff']));
+        $this->answer('finance-clearance', ['cleared' => 'yes'])->assertRedirect();
+        $this->actingAs($this->director);
+        $this->answer('records-review', $this->yes('record_reviewed', 'documents_merged', 'letter_finished', 'transcript_finished'))->assertRedirect();
+        $this->student->forceFill(['hasenrolled' => false, 'sponsor_email' => 'hr@school.example.org'])->save();
+        $this->answer('credential-ready', ['ready' => 'yes'])->assertRedirect();
+        $this->assertSame('failed', $this->step('mark-graduated')->status);
+        $this->assertFalse((bool) $this->student->fresh()->graduated);
     }
 
     public function test_a_later_international_submission_notifies_finance_again(): void

@@ -12,6 +12,8 @@ final class LegacyImporter
 {
     private const ENROLLMENT_HISTORY = ['enrollment_events', 'student_stage_enrollments', 'student_enrollments'];
 
+    private const STAGE_ALLOCATIONS = ['invoice_stage_allocations', 'transaction_stage_allocations'];
+
     public function __construct(private Connection $source, private Connection $target) {}
 
     public function run(bool $verifyOnly = false, ?Closure $progress = null): array
@@ -49,14 +51,20 @@ final class LegacyImporter
             return $this->target->transaction(function () use ($verifyOnly, $progress, $columns, $refresh, $preview) {
                 $plan = $refresh ? $this->refreshPlan() : null;
                 $enrollmentReset = [];
+                $allocationReset = [];
                 if ($refresh) {
                     foreach (self::ENROLLMENT_HISTORY as $table) {
                         $enrollmentReset[$table] = $this->target->table($table)->count();
                     }
+                    foreach (self::STAGE_ALLOCATIONS as $table) {
+                        if ($this->target->getSchemaBuilder()->hasTable($table)) {
+                            $allocationReset[$table] = $this->target->table($table)->count();
+                        }
+                    }
                 }
                 if ($preview) {
                     return ['mode' => 'refresh_preview', 'tables' => $plan,
-                        'enrollment_reset' => $enrollmentReset,
+                        'enrollment_reset' => $enrollmentReset, 'allocation_reset' => $allocationReset,
                         'source_database' => $this->source->getDatabaseName(),
                         'target_database' => $this->target->getDatabaseName()];
                 }
@@ -108,6 +116,7 @@ final class LegacyImporter
                     $report['mode'] = 'refresh_applied';
                     $report['refresh_plan'] = $plan;
                     $report['enrollment_reset'] = $enrollmentReset;
+                    $report['allocation_reset'] = $allocationReset;
                     $report['source_database'] = $this->source->getDatabaseName();
                     $report['target_database'] = $this->target->getDatabaseName();
                 }
@@ -141,6 +150,12 @@ final class LegacyImporter
         foreach (array_keys(BillingTables::MONEY) as $table) {
             $source = $this->source->table($table)->orderBy('id')->pluck('id')->all();
             $target = $this->target->table($table)->orderBy('id')->pluck('id')->all();
+            if ($table === 'programs') {
+                $collisions = $this->target->table('programs')->whereIn('id', $source)->where('staged', true)->pluck('id')->all();
+                if ($collisions !== []) {
+                    throw new RuntimeException('Source program IDs collide with locally configured staged programs: '.implode(', ', $collisions).'. Refresh refused to prevent assigning learners to the wrong program.');
+                }
+            }
             $localOnly = array_values(array_diff($target, $source));
             $plan[$table] = [
                 'source_rows' => count($source), 'target_rows' => count($target),
@@ -152,7 +167,7 @@ final class LegacyImporter
         }
         // Enrollment history is explicitly discarded; other Laravel-only records must survive intact.
         foreach ($this->target->getSchemaBuilder()->getTableListing(schemaQualified: false) as $table) {
-            if (array_key_exists($table, $plan) || in_array($table, self::ENROLLMENT_HISTORY, true)) {
+            if (array_key_exists($table, $plan) || in_array($table, [...self::ENROLLMENT_HISTORY, ...self::STAGE_ALLOCATIONS], true)) {
                 continue;
             }
             foreach ($this->target->getSchemaBuilder()->getForeignKeys($table) as $foreign) {
@@ -173,6 +188,11 @@ final class LegacyImporter
 
     private function resetEnrollments(): void
     {
+        foreach (self::STAGE_ALLOCATIONS as $table) {
+            if ($this->target->getSchemaBuilder()->hasTable($table)) {
+                $this->target->table($table)->delete();
+            }
+        }
         $this->target->table('students')->whereNotNull('current_enrollment_id')->orWhere('enrollment_revision', '!=', 0)
             ->update(['current_enrollment_id' => null, 'enrollment_revision' => 0]);
         foreach (['studenttransactions', 'invoices', 'studentpaymentplans', 'anticipatedpayment', 'loas'] as $table) {

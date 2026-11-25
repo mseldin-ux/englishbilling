@@ -6,13 +6,14 @@ final class BillingTables
 {
     public const STUDENT_HISTORY = ['originalcohort'];
 
-    public const PROGRAM_ADDITIONS = ['type', 'shortname', 'director_team_email', 'course_completion_survey_url', 'employer_survey_url', 'employment_form_url'];
+    public const PROGRAM_ADDITIONS = ['type', 'shortname', 'director_team_email', 'course_completion_survey_url', 'employer_survey_url', 'employment_form_url',
+        'staged', 'certleading', 'nextprog', 'certificate_program_id'];
 
     public static function destinationOnly(): array
     {
         return [
             'programs' => self::PROGRAM_ADDITIONS,
-            'students' => [...self::STUDENT_ADDITIONS, ...self::STUDENT_HISTORY, 'current_enrollment_id', 'enrollment_revision'],
+            'students' => [...self::STUDENT_ADDITIONS, ...self::STUDENT_HISTORY, 'current_enrollment_id', 'enrollment_revision', 'hasenrolled'],
             'studenttransactions' => ['enrollment_id', 'stage_enrollment_id', 'recognition'],
             'invoices' => ['enrollment_id', 'stage_enrollment_id', 'emailed_at'],
             'studentpaymentplans' => ['enrollment_id', 'stage_enrollment_id'],

@@ -161,7 +161,8 @@ class LegacyImportTest extends TestCase
             'associate' => 'Preserved', 'originalcohort' => 'Original', 'phone2' => '123',
         ]);
         DB::table('programs')->where('id', 10)->update(['program' => 'Local name', 'servicedays' => 600, 'shortname' => 'Local']);
-        DB::table('programs')->insert(['id' => 99, 'program' => 'Local program']);
+        DB::table('programs')->insert(['id' => 99, 'program' => 'Local program', 'staged' => true,
+            'certleading' => true, 'nextprog' => 0, 'certificate_program_id' => 10]);
         DB::table('students')->insert(['id' => 99, 'first_name' => 'Local only']);
         DB::table('invoices')->insert(['id' => 99, 'student_id' => 99, 'invoice_file' => 'Local PDF']);
         DB::table('studenttransactions')->insert(['id' => 99, 'student_id' => 99, 'invoice_id' => 99]);
@@ -187,7 +188,8 @@ class LegacyImportTest extends TestCase
         $this->assertSame("%PDF-new\0\xff", DB::table('invoices')->where('id', 30)->value('invoice_file'));
         $this->assertNull(DB::table('invoices')->where('id', 30)->value('emailed_at'));
         $this->assertDatabaseHas('programs', ['id' => 10, 'program' => 'Local name', 'servicedays' => 600, 'shortname' => 'Local']);
-        $this->assertDatabaseHas('programs', ['id' => 99]);
+        $this->assertDatabaseHas('programs', ['id' => 99, 'staged' => true, 'certleading' => true,
+            'nextprog' => 0, 'certificate_program_id' => 10]);
         $this->assertDatabaseHas('users', ['id' => $user->id, 'password' => $user->password]);
         $this->assertSame($report['tables'], $this->importer()->refresh(true)['tables']);
     }
@@ -207,8 +209,27 @@ class LegacyImportTest extends TestCase
         } catch (RuntimeException $exception) {
             $this->assertStringContainsString('workflow_runs references local-only students', $exception->getMessage());
         }
+
         $this->assertDatabaseHas('students', ['id' => 20, 'first_name' => 'Renée']);
         $this->assertDatabaseHas('workflow_runs', ['student_id' => 99]);
+    }
+
+    public function test_refresh_refuses_source_id_collisions_with_local_stage_programs_before_resetting_history(): void
+    {
+        $this->importer()->run();
+        $enrollment = $this->addEnrollmentHistory();
+        DB::table('programs')->insert(['id' => 99, 'program' => 'Local stage', 'staged' => true]);
+        $this->source->table('programs')->insert(['id' => 99, 'program' => 'Different production program']);
+        $this->source->table('students')->where('id', 20)->update(['first_name' => 'Must not apply']);
+        try {
+            $this->importer()->refresh(true);
+            $this->fail('Colliding stage program IDs must prevent the refresh.');
+        } catch (RuntimeException $exception) {
+            $this->assertStringContainsString('Source program IDs collide', $exception->getMessage());
+        }
+        $this->assertDatabaseHas('students', ['id' => 20, 'first_name' => 'Renée', 'current_enrollment_id' => $enrollment->id]);
+        $this->assertDatabaseHas('programs', ['id' => 99, 'program' => 'Local stage', 'staged' => true]);
+        $this->assertDatabaseHas('student_enrollments', ['id' => $enrollment->id]);
     }
 
     public function test_refresh_verification_failure_rolls_back_updates_inserts_and_deletions(): void
@@ -216,6 +237,9 @@ class LegacyImportTest extends TestCase
         $this->importer()->run();
         DB::table('invoices')->where('id', 30)->update(['emailed_at' => '2026-11-19 12:00:00']);
         $enrollment = $this->addEnrollmentHistory();
+        $stage = $enrollment->stages()->firstOrFail();
+        DB::table('transaction_stage_allocations')->insert(['transaction_id' => 40,
+            'stage_enrollment_id' => $stage->id, 'amount' => 100]);
         DB::table('finalgrades')->insert(['studentid' => 20, 'program_id' => 10,
             'enrollment_id' => $enrollment->id, 'enrollment_key' => 'enrollment:'.$enrollment->id]);
         DB::table('students')->insert(['id' => 99, 'first_name' => 'Local only']);
@@ -241,6 +265,7 @@ class LegacyImportTest extends TestCase
         $this->assertDatabaseCount('student_stage_enrollments', 1);
         $this->assertDatabaseCount('enrollment_events', 1);
         $this->assertDatabaseHas('studenttransactions', ['id' => 40, 'enrollment_id' => $enrollment->id, 'recognition' => 'application']);
+        $this->assertDatabaseHas('transaction_stage_allocations', ['transaction_id' => 40, 'stage_enrollment_id' => $stage->id, 'amount' => 100]);
         $this->assertDatabaseHas('finalgrades', ['enrollment_id' => $enrollment->id, 'enrollment_key' => 'enrollment:'.$enrollment->id]);
     }
 
@@ -338,9 +363,12 @@ class LegacyImportTest extends TestCase
     public function test_destination_only_program_fields_are_left_null_and_not_compared_with_django(): void
     {
         $report = $this->importer()->run();
-        $this->assertSame(['type', 'shortname', 'director_team_email', 'course_completion_survey_url', 'employer_survey_url', 'employment_form_url'], $report['destination_only_program_fields']);
+        $this->assertSame(BillingTables::PROGRAM_ADDITIONS, $report['destination_only_program_fields']);
         $this->assertNull(DB::table('programs')->where('id', 10)->value('type'));
         $this->assertNull(DB::table('programs')->where('id', 10)->value('shortname'));
+        foreach (['staged', 'certleading', 'nextprog', 'certificate_program_id'] as $field) {
+            $this->assertNull(DB::table('programs')->where('id', 10)->value($field));
+        }
         DB::table('programs')->where('id', 10)->update(['type' => str_repeat('t', 8), 'shortname' => str_repeat('s', 32)]);
         $this->assertSame($report['tables'], $this->importer()->run(true)['tables']);
         $this->assertSame(str_repeat('s', 32), DB::table('programs')->where('id', 10)->value('shortname'));
@@ -386,15 +414,25 @@ class LegacyImportTest extends TestCase
         $user = User::factory()->create();
         DB::table('program_stage_definitions')->insert(['program_id' => 10, 'stage' => 1, 'service_days' => 100]);
         $enrollment = $this->addEnrollmentHistory();
+        $stage = $enrollment->stages()->firstOrFail();
+        $invoiceId = DB::table('invoices')->where('student_id', 20)->value('id');
+        DB::table('invoice_stage_allocations')->insert(['invoice_id' => $invoiceId,
+            'stage_enrollment_id' => $stage->id, 'amount' => 100]);
+        DB::table('transaction_stage_allocations')->insert(['transaction_id' => 40,
+            'stage_enrollment_id' => $stage->id, 'amount' => 100]);
         $this->source->table('students')->where('id', 20)->update(['first_name' => 'Fresh source']);
         $counts = ['enrollment_events' => 1, 'student_stage_enrollments' => 1, 'student_enrollments' => 1];
         $preview = $this->importer()->refresh();
         $this->assertSame($counts, $preview['enrollment_reset']);
+        $this->assertSame(['invoice_stage_allocations' => 1, 'transaction_stage_allocations' => 1], $preview['allocation_reset']);
+        $this->assertDatabaseCount('invoice_stage_allocations', 1);
         $this->assertDatabaseHas('students', ['id' => 20, 'first_name' => 'Renée',
             'current_enrollment_id' => $enrollment->id, 'enrollment_revision' => 3]);
         $this->assertDatabaseHas('studenttransactions', ['id' => 40, 'enrollment_id' => $enrollment->id, 'recognition' => 'application']);
         $report = $this->importer()->refresh(true);
         $this->assertSame($counts, $report['enrollment_reset']);
+        $this->assertDatabaseCount('invoice_stage_allocations', 0);
+        $this->assertDatabaseCount('transaction_stage_allocations', 0);
         $this->assertDatabaseHas('students', ['id' => 20, 'first_name' => 'Fresh source',
             'current_enrollment_id' => null, 'enrollment_revision' => 0]);
         foreach (array_keys($counts) as $table) {

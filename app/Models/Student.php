@@ -11,7 +11,7 @@ class Student extends BillingModel
 {
     protected $table = 'students';
 
-    protected $attributes = ['enrollment_revision' => 0];
+    protected $attributes = ['enrollment_revision' => 0, 'hasenrolled' => true];
 
     protected function accessChangeDate(): Attribute
     {
@@ -43,7 +43,7 @@ class Student extends BillingModel
         $casts = ['balance' => 'decimal:2', 'payment_amount_due' => 'decimal:2',
             'birth_date' => 'immutable_date', 'access_change_date' => 'immutable_datetime',
             'access_status_code' => 'integer'];
-        foreach (['inactive', 'loa', 'pif', 'wd', 'sus', 'in_group', 'graduated',
+        foreach (['hasenrolled', 'inactive', 'loa', 'pif', 'wd', 'sus', 'in_group', 'graduated',
             'onextension', 'sponsored', 'archived', 'transferred',
             'self_pay', 'combination_payment', 'self_directed', 'comp_college'] as $field) {
             $casts[$field] = 'boolean';
@@ -71,6 +71,11 @@ class Student extends BillingModel
         return $this->belongsTo(StudentEnrollment::class, 'current_enrollment_id');
     }
 
+    public function academicProgramId(): ?int
+    {
+        return $this->currentEnrollment?->program_id ?? $this->program_id;
+    }
+
     public function stageSummary(): string
     {
         $enrollment = $this->currentEnrollment;
@@ -84,8 +89,17 @@ class Student extends BillingModel
         if ($enrollment->status === 'graduated') {
             return 'Graduated';
         }
+        if (config('billing.concurrent_stages')) {
+            $active = $enrollment->stages->whereNull('ended_on');
+            if ($active->isNotEmpty()) {
+                return $active->map(fn ($item) => 'Stage '.$item->stage
+                    .($item->program_name ? ' ('.$item->program_name.')' : '')
+                    .' — '.$item->status.' since '.$item->started_on->format('Y-m-d'))->implode('; ');
+            }
+        }
 
-        return 'Stage '.$stage->stage.($stage->completed_on ? ' done' : ' — '.$stage->status.' since '.$stage->started_on->format('Y-m-d'));
+        return 'Stage '.$stage->stage.($stage->program_name ? ' ('.$stage->program_name.')' : '')
+            .($stage->completed_on ? ' done' : ' — '.$stage->status.' since '.$stage->started_on->format('Y-m-d'));
     }
 
     public function transactions(): HasMany
