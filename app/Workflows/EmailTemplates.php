@@ -68,20 +68,28 @@ class EmailTemplates
 
     /**
      * @param  array<string, string|null>  $values
-     * @return array{subject: string, text: string, html: string}
+     * @return array{subject: string, text: string, html: string, source: string, is_html: bool}
      */
     public static function render(string $key, array $values, ?EmailTemplate $template = null): array
     {
         $template ??= self::get($key);
         $fill = fn (string $text, callable $escape) => preg_replace_callback('/\{([a-z_]+)\}/',
             fn ($match) => array_key_exists($match[1], $values) ? $escape((string) $values[$match[1]]) : $match[0], $text);
-        $text = $fill(str_replace("\r\n", "\n", $template->body), fn ($value) => $value);
+        $body = str_replace("\r\n", "\n", $template->body);
         $subject = trim(preg_replace('/\s+/', ' ', $fill($template->subject, fn ($value) => $value)));
-        $html = $fill(e(str_replace("\r\n", "\n", $template->body)), fn ($value) => e($value));
+        if ($template->is_html && self::definition($key)->kind === 'email') {
+            $html = $fill($body, fn ($value) => e($value));
+
+            return ['subject' => $subject, 'text' => HtmlText::convert($html), 'html' => $html,
+                'source' => $html, 'is_html' => true];
+        }
+        $text = $fill($body, fn ($value) => $value);
+        $html = $fill(e($body), fn ($value) => e($value));
         $html = preg_replace('~(https?://[^\s<]+[^\s<.,;:!?)\]])~', '<a href="$1">$1</a>', $html);
 
         return ['subject' => $subject, 'text' => $text,
-            'html' => '<div style="font-family: Arial, sans-serif; font-size: 15px; line-height: 1.45;">'.nl2br($html).'</div>'];
+            'html' => '<div style="font-family: Arial, sans-serif; font-size: 15px; line-height: 1.45;">'.nl2br($html).'</div>',
+            'source' => $text, 'is_html' => false];
     }
 
     /** Renders a letter template to a PDF with the CGMS letterhead. */

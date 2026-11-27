@@ -733,7 +733,11 @@ Nav link for records level and up.
 - Every email and the congratulations letter PDF have an editable subject and
   body with `{placeholders}`. Each template lists its placeholders.
 - Unknown placeholders and missing required links are rejected.
-- **Preview** shows sample values. **Reset** restores the original text.
+- Emails can use plain text (the default) or HTML source: select **Treat body as HTML source**
+  to enter markup, including links. Placeholder values are escaped in HTML.
+  The preview shows the HTML and its automatically generated plain-text fallback;
+  supported link destinations are included in the fallback. The PDF letter
+  template remains plain text. **Reset** restores the original plain text.
 - Changes apply to future drafts/sends. Workflow emails keep a copy of their
   sent text; invoice emails record only the send date.
 - **Invoice email** supplies the editable subject/message defaults in the
@@ -863,7 +867,9 @@ braces in learner data or custom text are preserved. **Refresh from template**
 rebuilds the preview using current values and asks before replacing edited email
 text. Changing invoice details does not overwrite that text: a notice asks staff
 to refresh or update the message themselves. Refresh also picks up changes to
-the shared template. The template editor still rejects unknown placeholders
+the shared template, including its plain-text or HTML format. For an HTML
+template, the per-send message is editable HTML source; its plain-text version
+is generated when sent. The template editor still rejects unknown placeholders
 and supports sample previews/reset. Saved invoice metadata may differ from an
 older stored PDF if that metadata was subsequently edited.
 From and Reply-To use the logged-in user's profile email; recipients come from
@@ -888,6 +894,15 @@ local email timestamps together with the replaced billing test data.
 Learner details offer **HTML Statement** and **Statement PDF**, and browse-page
 balances link to the HTML statement. Previews include print/download controls.
 All document routes require login and invoice routes enforce learner ownership.
+
+Admins can edit invoice and statement layouts separately under **Utilities →
+Document Templates**. The editor accepts HTML and CSS with the listed
+placeholders, and offers sample HTML and PDF previews. The starter layout
+reproduces the original; omitting a placeholder or section omits its contents
+from the document, so check the PDF before saving. Reset restores the original
+layout. Saved changes affect current document views and newly generated invoice
+PDFs, never existing stored invoice PDFs. Document templates are not Blade or
+PHP, and browser previews do not execute template scripts.
 
 Dompdf renders locally using the original application logo and bundled fonts.
 Remote fetching, embedded PHP, and JavaScript are disabled for PDF rendering.

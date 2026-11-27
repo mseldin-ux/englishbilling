@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Billing\BillingDocument;
+use App\Billing\DocumentTemplates;
 use App\Billing\PdfRenderer;
 use App\Models\Invoice;
 use App\Models\Student;
@@ -41,6 +42,15 @@ class DocumentController extends Controller
                 'Content-Disposition' => 'attachment; filename="'.$name.'.pdf"',
                 'Cache-Control' => 'private, no-store',
             ]);
+        }
+
+        $template = DocumentTemplates::saved($data['invoice'] ? 'invoice' : 'statement');
+        if ($template) {
+            $nonce = base64_encode(random_bytes(16));
+
+            return response()->view('documents.custom', [...$data, 'pdf' => false, 'templateBody' => $template->body, 'cspNonce' => $nonce])
+                ->header('Cache-Control', 'private, no-store')
+                ->header('Content-Security-Policy', "default-src 'none'; script-src 'nonce-{$nonce}'; style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'");
         }
 
         return response()->view('documents.billing', [...$data, 'pdf' => false])

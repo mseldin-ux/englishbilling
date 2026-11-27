@@ -9,6 +9,11 @@ class EmailTemplate extends Model
 {
     protected $guarded = ['id'];
 
+    protected function casts(): array
+    {
+        return ['is_html' => 'boolean'];
+    }
+
     public function editor(): BelongsTo
     {
         return $this->belongsTo(User::class, 'updated_by');

@@ -35,10 +35,12 @@
             <label><input type="checkbox" name="email_invoice" value="1"> Email the stored invoice PDF after creating it</label>
             <div data-invoice-email-fields hidden>
                 <input type="hidden" name="email_previewed" value="1">
+                <input type="hidden" name="email_is_html" value="0">
                 <p>From: <span data-email-from>{{ auth()->user()->email ?: 'No email in your user profile' }}</span><br>
                     To: <span data-email-to>{{ $student->emailaddr ?: 'No learner email recorded' }}</span></p>
                 <label>Subject <input name="email_subject" maxlength="255"></label>
                 <label>Message <textarea name="email_message" rows="6" maxlength="20000"></textarea></label>
+                <p class="hint" data-email-format></p>
                 <button type="button" data-refresh-email-preview>Refresh from template</button>
                 <p class="hint">This is an editable preview of the <a href="{{ route('templates.edit', \App\Billing\InvoiceEmail::KEY) }}" target="_blank" rel="noopener">invoice email template</a>.
                     Only {invoice_id} waits until the invoice is saved. If you change invoice details after preparing the preview, refresh from the template or update the message yourself.</p>
@@ -58,10 +60,12 @@
                 @if($invoice->emailed_at) data-confirm="This invoice has already been emailed. Send it again?" @endif>
                 @csrf
                 <input type="hidden" name="email_previewed" value="1">
+                <input type="hidden" name="email_is_html" value="0">
                 <p>From: <span data-email-from>{{ auth()->user()->email ?: 'No email in your user profile' }}</span><br>
                     To: <span data-email-to>{{ $student->emailaddr ?: 'No learner email recorded' }}</span></p>
                 <label>Subject <input name="email_subject" maxlength="255" required></label>
                 <label>Message <textarea name="email_message" rows="6" maxlength="20000" required></textarea></label>
+                <p class="hint" data-email-format></p>
                 <button type="button" data-refresh-email-preview>Refresh from template</button>
                 <p class="hint">This editable preview uses saved invoice values. Edit it for this email, or change the <a href="{{ route('templates.edit', \App\Billing\InvoiceEmail::KEY) }}" target="_blank" rel="noopener">shared invoice email template</a>.
                     The attached stored PDF is unchanged.</p>

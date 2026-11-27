@@ -5,6 +5,7 @@ use App\Http\Controllers\BillingRecordController;
 use App\Http\Controllers\CourseCompletionController;
 use App\Http\Controllers\CourseCompletionPortalController;
 use App\Http\Controllers\DocumentController;
+use App\Http\Controllers\DocumentTemplateController;
 use App\Http\Controllers\EmailTemplateController;
 use App\Http\Controllers\EnrollmentController;
 use App\Http\Controllers\FinalGradesController;
@@ -56,6 +57,10 @@ Route::middleware(['auth', 'user-access', 'staff-session'])->group(function () {
     Route::post('/logout', [SessionController::class, 'destroy'])->name('logout');
     Route::get('/utilities', [UtilitiesController::class, 'index'])->middleware('admin')->name('utilities.index');
     Route::post('/utilities/mail', [UtilitiesController::class, 'testMail'])->middleware(['admin', 'throttle:6,1'])->name('utilities.mail');
+    Route::get('/admin/document-templates', [DocumentTemplateController::class, 'index'])->middleware('admin')->name('document-templates.index');
+    Route::get('/admin/document-templates/{key}', [DocumentTemplateController::class, 'edit'])->middleware('admin')->name('document-templates.edit');
+    Route::put('/admin/document-templates/{key}', [DocumentTemplateController::class, 'update'])->middleware('admin')->name('document-templates.update');
+    Route::get('/admin/document-templates/{key}/preview-pdf', [DocumentTemplateController::class, 'previewPdf'])->middleware('admin')->name('document-templates.preview-pdf');
     Route::resource('admin/programs', ProgramController::class)->except(['show', 'destroy'])->middleware('admin');
     Route::get('/records', [RecordsController::class, 'index'])->name('workspace.index');
     Route::get('/records/export', [RecordsController::class, 'export'])->name('workspace.export');

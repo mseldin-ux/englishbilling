@@ -25,12 +25,13 @@ class EmailTemplateController extends Controller
         $template = EmailTemplates::get($key)->load('editor');
         $subject = (string) old('subject', $request->session()->get('preview.subject', $template->subject));
         $body = (string) old('body', $request->session()->get('preview.body', $template->body));
+        $isHtml = (bool) old('is_html', $request->session()->get('preview.is_html', $template->is_html));
         $preview = $request->session()->has('preview')
-            ? EmailTemplates::render($key, EmailTemplates::sample($key), $template->replicate()->fill(['subject' => $subject, 'body' => $body]))
+            ? EmailTemplates::render($key, EmailTemplates::sample($key), $template->replicate()->fill(['subject' => $subject, 'body' => $body, 'is_html' => $isHtml]))
             : EmailTemplates::render($key, EmailTemplates::sample($key), $template);
 
         return view('templates.edit', ['definition' => $definition, 'template' => $template, 'subject' => $subject,
-            'body' => $body, 'preview' => $preview, 'previewing' => $request->session()->has('preview')]);
+            'body' => $body, 'isHtml' => $isHtml, 'preview' => $preview, 'previewing' => $request->session()->has('preview')]);
     }
 
     public function update(Request $request, string $key)
@@ -39,23 +40,26 @@ class EmailTemplateController extends Controller
         $data = $request->validate([
             'subject' => ['required', 'string', 'max:255'],
             'body' => ['required', 'string', 'max:20000'],
+            'is_html' => ['sometimes', 'boolean'],
             'action' => ['nullable', 'in:save,preview,reset'],
         ]);
         $data['subject'] = trim(preg_replace('/\s+/', ' ', $data['subject']));
+        $data['is_html'] = $request->boolean('is_html') && EmailTemplates::definition($key)->kind === 'email';
         if (($data['action'] ?? 'save') === 'reset') {
             $definition = EmailTemplates::definition($key);
             $data['subject'] = $definition->subject;
             $data['body'] = $definition->body;
+            $data['is_html'] = false;
         }
         $problems = EmailTemplates::problems($key, $data['subject'], $data['body']);
         if ($problems !== []) {
             throw ValidationException::withMessages($problems);
         }
         if (($data['action'] ?? 'save') === 'preview') {
-            return redirect()->route('templates.edit', $key)->with('preview', ['subject' => $data['subject'], 'body' => $data['body']]);
+            return redirect()->route('templates.edit', $key)->with('preview', ['subject' => $data['subject'], 'body' => $data['body'], 'is_html' => $data['is_html']]);
         }
         $template = EmailTemplates::get($key);
-        $template->forceFill(['subject' => $data['subject'], 'body' => str_replace("\r\n", "\n", $data['body']),
+        $template->forceFill(['subject' => $data['subject'], 'body' => str_replace("\r\n", "\n", $data['body']), 'is_html' => $data['is_html'],
             'updated_by' => $request->user()->id])->save();
         Log::info('Email template updated.', ['key' => $key, 'user_id' => $request->user()->id, 'reset' => ($data['action'] ?? null) === 'reset']);
 

@@ -246,6 +246,7 @@ class BillingRecordController extends Controller
         $message = EmailTemplates::render(InvoiceEmail::KEY, InvoiceEmail::variables($student, $record, $request->user(), $allocationStageIds));
 
         return response()->json(['subject' => $message['subject'], 'text' => $message['text'],
+            'source' => $message['source'], 'is_html' => $message['is_html'],
             'from' => $request->user()->email ?? '', 'to' => $student->emailaddr ?? ''])
             ->header('Cache-Control', 'private, no-store');
     }
@@ -254,6 +255,7 @@ class BillingRecordController extends Controller
     {
         $data = $request->validate([
             'email_previewed' => ['sometimes', 'boolean'],
+            'email_is_html' => ['sometimes', 'boolean'],
             'email_subject' => [Rule::requiredIf($request->boolean('email_previewed')), 'string', 'max:255'],
             'email_message' => ['required', 'string', 'max:20000'],
         ]);
@@ -270,7 +272,8 @@ class BillingRecordController extends Controller
             throw ValidationException::withMessages(['email' => 'This invoice has no stored PDF to email.']);
         }
         $template = EmailTemplates::get(InvoiceEmail::KEY)->replicate();
-        $template->forceFill(['subject' => $data['email_subject'] ?? $template->subject, 'body' => $data['email_message']]);
+        $template->forceFill(['subject' => $data['email_subject'] ?? $template->subject, 'body' => $data['email_message'],
+            'is_html' => $data['email_is_html'] ?? $template->is_html]);
         $previewed = $request->boolean('email_previewed');
         $problems = $previewed ? [] : EmailTemplates::problems(InvoiceEmail::KEY, $template->subject, $template->body);
         if ($problems !== []) {
@@ -279,7 +282,7 @@ class BillingRecordController extends Controller
                 'email_message' => $problems['body'] ?? [],
             ]);
         }
-        // A composed preview is literal text; only its deferred invoice ID is still a placeholder.
+        // A composed preview is not re-expanded; only its deferred invoice ID is still a placeholder.
         $variables = $previewed ? ['invoice_id' => (string) $record->id] : InvoiceEmail::variables($student, $record, $sender);
         $message = EmailTemplates::render(InvoiceEmail::KEY, $variables, $template);
         if (! Mail::isFake()) {

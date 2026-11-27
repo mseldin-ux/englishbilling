@@ -11,7 +11,10 @@ class PdfRenderer
 {
     public function render(array $data): string
     {
-        return $this->renderView('documents.billing', $data);
+        $template = DocumentTemplates::saved($data['invoice'] ? 'invoice' : 'statement');
+
+        return $this->renderView($template ? 'documents.custom' : 'documents.billing',
+            $template ? [...$data, 'templateBody' => $template->body] : $data);
     }
 
     public function renderView(string $view, array $data): string

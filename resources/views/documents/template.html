@@ -1,0 +1,35 @@
+<style>{default_styles}</style>
+<table class="document-header"><tr>
+    <td><img class="logo" src="{logo_url}" alt="The Center for Guided Montessori Studies"></td>
+    <td class="contact">9650 Strickland Rd Suite 103-127<br>Raleigh, NC 27615<br>(888) 344-7897<br>www.cgms.edu<br>info@cgms.edu</td>
+</tr></table>
+<h1 class="titlebar">{title}</h1>
+<aside class="sidebar">
+    <div class="box"><h3>{document_info_heading}</h3>{document_info}</div>
+    <div class="box">
+        <h3>Student Info</h3>Adult Learner<br>{learner_name}<br>
+        {learner_address}<br>{learner_address_line_2}
+        {learner_city}, {learner_state} {learner_zip}<br>{learner_email}
+        <p><b>Student ID:</b> {student_id}<br><b>Cohort:</b> {cohort}<br>
+        <b>Start Date:</b> {start_date}<br><b>Grad Date:</b> {graduation_date}<br><b>Status:</b> {status}</p>
+    </div>
+</aside>
+<div class="content">
+    <table class="billing-recipient"><tr><td>
+        <h3>{recipient_heading}</h3>
+        <div>{recipient}</div><div class="multiline">{billing_address}</div><div>{billing_email}</div>
+    </td><td>{billing_details}</td></tr></table>
+    {transaction_heading}
+    <table class="ledger" id="billingtable">
+        <thead><tr><th class="date">Date</th><th>Event</th><th>Description</th><th class="amount">Amount</th></tr></thead>
+        <tbody>{transaction_rows}</tbody>
+    </table>
+    <p class="balance">Balance: {balance}</p>
+    <div class="payment-notice">
+        <h3>PAYMENT DUE: <span class="due_amount">{amount_due}</span></h3>
+        <h3>DUE DATE: <span class="due_date">{due_date}</span></h3>
+        {urgent_message}{note}
+    </div>
+    <p>PLEASE MAIL PAYMENT TO:<br>9650 Strickland Rd Suite 103-127, Raleigh, NC 27615</p>
+</div>
+<footer>Please direct invoice-related questions to finance@cgms.edu. Make checks to Center for Guided Montessori Studies.</footer>

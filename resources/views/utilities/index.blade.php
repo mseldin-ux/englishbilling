@@ -4,6 +4,8 @@
     <h2>Utilities</h2>
     <h3>Enrollment settings</h3>
     <p><a href="{{ route('programs.index') }}">Manage programs and stage sequences</a></p>
+    <h3>Document templates</h3>
+    <p><a href="{{ route('document-templates.index') }}">Edit invoice and statement layouts</a></p>
     <h3>Test mail connection</h3>
     <p>Configured mailer: <strong>{{ $mailer }}</strong> (transport: {{ $transport }}).</p>
     <p>This sends a plain-text message immediately using the application's current mail configuration.

@@ -11,7 +11,11 @@
         <label>{{ $definition->kind === 'letter' ? 'PDF file name' : 'Subject' }}
             <input type="text" name="subject" maxlength="255" size="80" required value="{{ $subject }}">
         </label>
-        <label>{{ $definition->kind === 'letter' ? 'Letter text (plain text, printed on CGMS letterhead)' : 'Body (plain text; web addresses become links automatically)' }}
+        @if($definition->kind === 'email')
+            <label><input type="hidden" name="is_html" value="0"><input type="checkbox" name="is_html" value="1" @checked($isHtml)> Treat body as HTML source</label>
+            <p class="hint">Use HTML tags for formatting and links when selected. Existing plain-text templates retain automatic web links; HTML emails also include an automatically generated plain-text version.</p>
+        @endif
+        <label>{{ $definition->kind === 'letter' ? 'Letter text (plain text, printed on CGMS letterhead)' : 'Body' }}
             <textarea name="body" rows="20" required>{{ $body }}</textarea>
         </label>
     </fieldset>
@@ -31,6 +35,10 @@
 </fieldset>
 <h3>{{ $previewing ? 'Preview of your unsaved changes' : 'Preview of the saved template' }} (sample values)</h3>
 <p><strong>{{ $definition->kind === 'letter' ? 'File name' : 'Subject' }}:</strong> {{ $preview['subject'] }}</p>
+@if($preview['is_html'])
+    <iframe title="HTML email preview" sandbox srcdoc="{{ $preview['html'] }}" style="width: 100%; min-height: 240px; border: 1px solid #aaa"></iframe>
+    <h4>Plain-text version</h4>
+@endif
 <div class="template-preview">{{ $preview['text'] }}</div>
 </div>
 @endsection

@@ -87,7 +87,10 @@
         try {
             const preview = await request(form.dataset.emailPreviewUrl, data);
             form.elements.email_subject.value = preview.subject;
-            form.elements.email_message.value = preview.text;
+            form.elements.email_message.value = preview.source;
+            form.elements.email_is_html.value = preview.is_html ? '1' : '0';
+            form.querySelector('[data-email-format]').textContent = preview.is_html
+                ? 'Message uses HTML source; edit tags and links directly.' : 'Message uses plain text.';
             form.querySelector('[data-email-from]').textContent = preview.from || 'No email in your user profile';
             form.querySelector('[data-email-to]').textContent = preview.to || 'No learner email recorded';
             form.dataset.emailPreviewReady = '1';
@@ -329,6 +332,7 @@
                     form.elements.email_message.value = data.email_message.replaceAll('{invoice_id}', form.dataset.invoiceId);
                     const emailed = await request(form.dataset.invoiceEmailUrl, {
                         email_previewed: data.email_previewed, email_subject: data.email_subject, email_message: data.email_message,
+                        email_is_html: data.email_is_html,
                     });
                     form.dataset.invoiceEmailed = '1';
                     result.message += ` ${emailed.message}`;
